@@ -363,6 +363,7 @@ axios.get(`${API}/api/jobsheets/next-number`)
     setPattern("");
     setIdProofType("");
     setIdProofImage(null);
+    setIdProofPreview(null);
     setMobileStatus("");
 
     setPhysicalCondition([]);
@@ -780,14 +781,7 @@ onChange={(e) => setMobileStatus(e.target.value)}
                 <select
                   className="form-select form-select-sm"
                   value={idProofType}
-                  onChange={(e) => {
-  const file = e.target.files[0];
-  setIdProofImage(file);
-
-  if (file) {
-    setIdProofPreview(URL.createObjectURL(file));
-  }
-}}
+                  onChange={(e) => setIdProofType(e.target.value)}
                 >
                   <option value="">Select ID Proof</option>
                   <option value="Aadhaar Card">Aadhaar Card</option>
@@ -805,13 +799,29 @@ onChange={(e) => setMobileStatus(e.target.value)}
                   type="file"
                   accept="image/*"
                   className="form-control form-control-sm"
-                  onChange={(e) => setIdProofImage(e.target.files[0])}
+                  onChange={(e) => {
+  const file = e.target.files[0];
+  setIdProofImage(file);
+
+  if (file) {
+    setIdProofPreview(URL.createObjectURL(file));
+  }
+}}
                   disabled={
                     idProofType === "ID Not Required" ||
                     idProofType === "Dealer Collected"
                   }
                 />
+
+                
               </div>
+              {idProofPreview && (
+  <img
+    src={idProofPreview}
+    alt="ID Preview"
+    style={{ width: "120px", marginTop: "5px" }}
+  />
+)}
 
 
             </div>
