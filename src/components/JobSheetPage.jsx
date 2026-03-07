@@ -37,8 +37,9 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
       setJobSheetNo(editData.jobSheetNo);
     } else {
       // 🆕 NEW MODE → localStorage
-      let lastNo = localStorage.getItem("JOB_SHEET_NO") || 1;
-      setJobSheetNo(`JS-${String(lastNo).padStart(3, "0")}`);
+      axios.get(`${API}/api/jobsheets/next-number`)
+  .then(res => setJobSheetNo(res.data.next))
+  .catch(err => console.error(err));
     }
   }, [isEdit, editData]);
 
@@ -317,11 +318,10 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
       );
 
       /* ================= JOB NUMBER INCREMENT ================= */
-      let lastNo = localStorage.getItem("JOB_SHEET_NO") || 1;
-      const nextNo = parseInt(lastNo) + 1;
-
-      localStorage.setItem("JOB_SHEET_NO", nextNo);
-      setJobSheetNo(`JS-${String(nextNo).padStart(3, "0")}`);
+      // get next job number from DB
+axios.get(`${API}/api/jobsheets/next-number`)
+  .then(res => setJobSheetNo(res.data.next))
+  .catch(err => console.error(err));
 
       alert("Job Sheet Saved Successfully ✅");
 
@@ -385,9 +385,11 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
     navigate("/jobsheet"); // go to fresh route
 
     // ✅ NEW JOB NUMBER
-    let lastNo = localStorage.getItem("JOB_SHEET_NO") || 1;
-    setJobSheetNo(`JS-${String(lastNo).padStart(3, "0")}`);
-  };
+    
+  axios.get(`${API}/api/jobsheets/next-number`)
+    .then(res => setJobSheetNo(res.data.next))
+    .catch(err => console.error(err));
+};
 
   /* ================= EDIT DATA ================= */
 
