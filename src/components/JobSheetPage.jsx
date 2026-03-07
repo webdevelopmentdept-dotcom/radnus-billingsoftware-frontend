@@ -89,6 +89,7 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
   const [mobileStatus, setMobileStatus] = useState("");
   const [idProofType, setIdProofType] = useState("");
   const [idProofImage, setIdProofImage] = useState(null);
+  const [idProofPreview, setIdProofPreview] = useState(null);
 
   /* ================= CHECKBOX ARRAYS ================= */
   const [physicalCondition, setPhysicalCondition] = useState([]);
@@ -779,7 +780,14 @@ onChange={(e) => setMobileStatus(e.target.value)}
                 <select
                   className="form-select form-select-sm"
                   value={idProofType}
-                  onChange={(e) => setIdProofType(e.target.value)}
+                  onChange={(e) => {
+  const file = e.target.files[0];
+  setIdProofImage(file);
+
+  if (file) {
+    setIdProofPreview(URL.createObjectURL(file));
+  }
+}}
                 >
                   <option value="">Select ID Proof</option>
                   <option value="Aadhaar Card">Aadhaar Card</option>
