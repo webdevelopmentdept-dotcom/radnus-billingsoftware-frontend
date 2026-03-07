@@ -815,13 +815,13 @@ onChange={(e) => setMobileStatus(e.target.value)}
 
                 
               </div>
-              {idProofPreview && (
+              {/* {idProofPreview && (
   <img
     src={idProofPreview}
     alt="ID Preview"
     style={{ width: "120px", marginTop: "5px" }}
   />
-)}
+)} */}
 
 
             </div>
@@ -1068,7 +1068,7 @@ onChange={(e) => setMobileStatus(e.target.value)}
                 alert("Please save Job Sheet first");
                 return;
               }
-              window.open(`/estimate-bill/${editData._id}`, "_blank");
+              window.open(`${window.location.origin}/estimate-bill/${editData._id}`, "_blank");
             }}
           >
             Estimate
@@ -1096,7 +1096,7 @@ onChange={(e) => setMobileStatus(e.target.value)}
 
                 alert("Invoice Generated & Locked 🔒");
 
-                window.open(`/invoice/${localEditData._id}`, "_blank");
+                window.open(`${window.location.origin}/invoice/${localEditData._id}`, "_blank");
               } catch (err) {
                 alert("Invoice failed ❌");
               }
