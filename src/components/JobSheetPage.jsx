@@ -411,7 +411,7 @@ axios.get(`${API}/api/jobsheets/next-number`)
     setWarranty(editData.device?.warranty || "");
     setPattern(editData.device?.pattern || "");
     setIdProofType(editData.device?.idProofType || "");
-    setIdProofImage(editData.device?.idProofImage || "");
+   setIdProofPreview(editData.idProofImage || "");
     setMobileStatus(editData.device?.mobileStatus || "");
 
     // CHECKBOX ARRAYS
