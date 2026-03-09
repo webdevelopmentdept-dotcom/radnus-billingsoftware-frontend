@@ -245,7 +245,7 @@ const InvoiceBill = () => {
             try {
               await axios.post(
                 `${API}/api/jobsheets/send-invoice/${job._id}`
-              );
+               );
 
               alert("Invoice Sent Successfully ✅");
             } catch (err) {
