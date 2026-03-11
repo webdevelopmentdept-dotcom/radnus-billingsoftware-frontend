@@ -9,6 +9,8 @@ const EstimateBill = () => {
 
   const [data, setData] = useState(null);
   const [sending, setSending] = useState(false);
+  const params = new URLSearchParams(window.location.search);
+  const isPDF = params.get("pdf");
 
   const API = import.meta.env.VITE_API_URL;
 
@@ -28,12 +30,12 @@ const EstimateBill = () => {
   // if (!data) return <div style={{ padding: 20 }}>Loading...</div>;
 
   if (!data) {
-  return (
-    <div style={{padding:20,fontFamily:"Segoe UI"}}>
-      Loading Estimate...
-    </div>
-  );
-}
+    return (
+      <div style={{ padding: 20, fontFamily: "Segoe UI" }}>
+        Loading Estimate...
+      </div>
+    );
+  }
 
 
   const val = (v) => (v ? v : "NIL");
@@ -108,7 +110,7 @@ const EstimateBill = () => {
   return (
     <>
 
-<style>{`
+      <style>{`
 
 @page{
 size:A4;
@@ -270,181 +272,181 @@ body{background:#fff}
 `}</style>
 
 
-<div className="wrapper">
+      <div className="wrapper">
 
-<div className="a4">
+        <div className="a4">
 
-<div className="watermark">RADNUS</div>
-
-
-{/* HEADER */}
-
-<div className="header">
-
-<div>
-<div className="company">RADNUS COMMUNICATION</div>
-
-<div className="sub">
-242, Sinnaya Plaza, MG Road,<br/>
-Puducherry - 605001<br/>
-Phone: 81222 73355<br/>
-Mon–Sat (10AM–7PM)<br/>
-Website: www.radnus.in
-</div>
-</div>
+          <div className="watermark">RADNUS</div>
 
 
-<div className="logo-box">
-<img src={logo} alt="logo"/>
-</div>
+          {/* HEADER */}
+
+          <div className="header">
+
+            <div>
+              <div className="company">RADNUS COMMUNICATION</div>
+
+              <div className="sub">
+                242, Sinnaya Plaza, MG Road,<br />
+                Puducherry - 605001<br />
+                Phone: 81222 73355<br />
+                Mon–Sat (10AM–7PM)<br />
+                Website: www.radnus.in
+              </div>
+            </div>
 
 
-<div className="job-box">
-
-<div className="job-title">JOB SHEET</div>
-
-<table>
-<tbody>
-
-<tr>
-<td><b>Job No</b></td>
-<td>:</td>
-<td>{val(data.jobSheetNo)}</td>
-</tr>
-
-<tr>
-<td><b>Created</b></td>
-<td>:</td>
-<td>{val(data.createdAt?.slice(0,10))}</td>
-</tr>
-
-<tr>
-<td><b>Delivery</b></td>
-<td>:</td>
-<td>{val(data.service?.deliveryDate?.slice(0,10))}</td>
-</tr>
-
-<tr>
-<td><b>Engineer</b></td>
-<td>:</td>
-<td>{val(data.service?.engineer)}</td>
-</tr>
-
-</tbody>
-</table>
-
-</div>
-</div>
+            <div className="logo-box">
+              <img src={logo} alt="logo" />
+            </div>
 
 
-{/* CUSTOMER + DEVICE */}
+            <div className="job-box">
 
-<div className="grid section">
+              <div className="job-title">JOB SHEET</div>
 
-<div>
+              <table>
+                <tbody>
 
-<div className="section-title">Customer</div>
+                  <tr>
+                    <td><b>Job No</b></td>
+                    <td>:</td>
+                    <td>{val(data.jobSheetNo)}</td>
+                  </tr>
 
-<div className="box">
-Name: {val(data.customer?.name)}<br/>
-Phone: {val(data.customer?.contact)}<br/>
-Email: {val(data.customer?.email)}<br/>
-Address: {val(data.customer?.address)}
-</div>
+                  <tr>
+                    <td><b>Created</b></td>
+                    <td>:</td>
+                    <td>{val(data.createdAt?.slice(0, 10))}</td>
+                  </tr>
 
-</div>
+                  <tr>
+                    <td><b>Delivery</b></td>
+                    <td>:</td>
+                    <td>{val(data.service?.deliveryDate?.slice(0, 10))}</td>
+                  </tr>
 
+                  <tr>
+                    <td><b>Engineer</b></td>
+                    <td>:</td>
+                    <td>{val(data.service?.engineer)}</td>
+                  </tr>
 
-<div>
+                </tbody>
+              </table>
 
-<div className="section-title">Device</div>
-
-<div className="box">
-Brand: {val(data.device?.make)}<br/>
-Model: {val(data.device?.model)}<br/>
-IMEI: {val(data.device?.imei)}
-</div>
-
-</div>
-
-</div>
-
-
-{/* ESTIMATE */}
-
-<div className="section">
-
-<div className="section-title">Estimate Amount</div>
-
-<div className="estimate-box">
-
-<div style={{display:"flex",justifyContent:"space-between"}}>
-<span>Service Charge</span>
-<span>₹ {data.service?.serviceCharge || 0}</span>
-</div>
-
-<div style={{display:"flex",justifyContent:"space-between",marginTop:5}}>
-<span>Spare Charge</span>
-<span>₹ {data.service?.spareCharge || 0}</span>
-</div>
-
-<hr/>
-
-<div style={{display:"flex",justifyContent:"space-between",fontWeight:"bold"}}>
-<span>Total Estimate</span>
-<span>₹ {total}</span>
-</div>
-
-</div>
-
-</div>
+            </div>
+          </div>
 
 
-{/* SIGN */}
+          {/* CUSTOMER + DEVICE */}
 
-<div className="sign-row">
+          <div className="grid section">
 
-<div className="sign-box">
-<div className="sign-line"></div>
-<div className="sign-label">Customer Signature</div>
-</div>
+            <div>
 
-<div className="sign-box">
-<div className="sign-line"></div>
-<div className="sign-label">For RADNUS</div>
-</div>
+              <div className="section-title">Customer</div>
 
-<div className="sign-box">
-<div className="sign-line"></div>
-<div className="sign-label">Authorized Signatory</div>
-</div>
+              <div className="box">
+                Name: {val(data.customer?.name)}<br />
+                Phone: {val(data.customer?.contact)}<br />
+                Email: {val(data.customer?.email)}<br />
+                Address: {val(data.customer?.address)}
+              </div>
 
-</div>
+            </div>
 
 
-</div>
-</div>
+            <div>
 
-{!isPDF && (
-<div className="no-print">
+              <div className="section-title">Device</div>
 
-<button onClick={handlePrint} style={btn}>
-🖨 Print / Download
-</button>
+              <div className="box">
+                Brand: {val(data.device?.make)}<br />
+                Model: {val(data.device?.model)}<br />
+                IMEI: {val(data.device?.imei)}
+              </div>
 
-<button
-onClick={handleEmail}
-style={{...btn,marginLeft:10}}
-disabled={sending}
->
-{sending ? "Sending..." : "📧 Send Email"}
-</button>
+            </div>
 
-</div>
-)}
+          </div>
 
 
-{/* <div className="no-print">
+          {/* ESTIMATE */}
+
+          <div className="section">
+
+            <div className="section-title">Estimate Amount</div>
+
+            <div className="estimate-box">
+
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span>Service Charge</span>
+                <span>₹ {data.service?.serviceCharge || 0}</span>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "space-between", marginTop: 5 }}>
+                <span>Spare Charge</span>
+                <span>₹ {data.service?.spareCharge || 0}</span>
+              </div>
+
+              <hr />
+
+              <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold" }}>
+                <span>Total Estimate</span>
+                <span>₹ {total}</span>
+              </div>
+
+            </div>
+
+          </div>
+
+
+          {/* SIGN */}
+
+          <div className="sign-row">
+
+            <div className="sign-box">
+              <div className="sign-line"></div>
+              <div className="sign-label">Customer Signature</div>
+            </div>
+
+            <div className="sign-box">
+              <div className="sign-line"></div>
+              <div className="sign-label">For RADNUS</div>
+            </div>
+
+            <div className="sign-box">
+              <div className="sign-line"></div>
+              <div className="sign-label">Authorized Signatory</div>
+            </div>
+
+          </div>
+
+
+        </div>
+      </div>
+
+      {!isPDF && (
+        <div className="no-print">
+
+          <button onClick={handlePrint} style={btn}>
+            🖨 Print / Download
+          </button>
+
+          <button
+            onClick={handleEmail}
+            style={{ ...btn, marginLeft: 10 }}
+            disabled={sending}
+          >
+            {sending ? "Sending..." : "📧 Send Email"}
+          </button>
+
+        </div>
+      )}
+
+
+      {/* <div className="no-print">
 
 <button onClick={handlePrint} style={btn}>
 🖨 Print / Download
@@ -460,8 +462,8 @@ disabled={sending}
 
 </div> */}
 
-</>
-);
+    </>
+  );
 };
 
 export default EstimateBill;
