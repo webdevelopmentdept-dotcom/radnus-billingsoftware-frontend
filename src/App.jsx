@@ -22,7 +22,7 @@ import InvoiceBill from "./components/InvoiceBill";
 import UserReportPage from "./components/reports/UserReportPage";
 import UserListPopup from "./components/popups/UserListPopup";
 import SpareReportPage from "./components/reports/SpareReportPage";
-
+import './App.css'
 function App() {
   return (
     <BrowserRouter>

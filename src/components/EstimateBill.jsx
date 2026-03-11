@@ -25,7 +25,15 @@ const EstimateBill = () => {
   }, [id, API]);
 
 
-  if (!data) return <div style={{ padding: 20 }}>Loading...</div>;
+  // if (!data) return <div style={{ padding: 20 }}>Loading...</div>;
+
+  if (!data) {
+  return (
+    <div style={{padding:20,fontFamily:"Segoe UI"}}>
+      Loading Estimate...
+    </div>
+  );
+}
 
 
   const val = (v) => (v ? v : "NIL");
@@ -417,7 +425,7 @@ IMEI: {val(data.device?.imei)}
 </div>
 </div>
 
-
+{!isPDF && (
 <div className="no-print">
 
 <button onClick={handlePrint} style={btn}>
@@ -433,6 +441,24 @@ disabled={sending}
 </button>
 
 </div>
+)}
+
+
+{/* <div className="no-print">
+
+<button onClick={handlePrint} style={btn}>
+🖨 Print / Download
+</button>
+
+<button
+onClick={handleEmail}
+style={{...btn,marginLeft:10}}
+disabled={sending}
+>
+{sending ? "Sending..." : "📧 Send Email"}
+</button>
+
+</div> */}
 
 </>
 );
