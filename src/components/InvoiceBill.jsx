@@ -2,7 +2,8 @@ import { useParams } from "react-router-dom";
 import { useEffect, useState } from "react";
 import axios from "axios";
 import html2pdf from "html2pdf.js";
-import Logo from "../assets/logo.png"
+import Logo from "../assets/logo.png";
+
 const InvoiceBill = () => {
   const { id } = useParams();
   const [job, setJob] = useState(null);
@@ -17,40 +18,36 @@ const InvoiceBill = () => {
 
   if (!job) return <p>Loading...</p>;
 
-  /* ================= ITEMS ================= */
   const items =
     job.items?.length > 0
       ? job.items
       : [
-        {
-          make: job.device?.make,
-          model: job.device?.model,
-          imei: job.device?.imei,
-          fault: job.visualIssues?.join(", "),
-          service: job.service?.serviceCharge,
-          spare: job.service?.spareCharge,
-        },
-      ];
+          {
+            make: job.device?.make,
+            model: job.device?.model,
+            imei: job.device?.imei,
+            fault: job.visualIssues?.join(", "),
+            service: job.service?.serviceCharge,
+            spare: job.service?.spareCharge,
+          },
+        ];
 
-  /* ================= TOTAL ================= */
   const subTotal = items.reduce(
     (sum, i) => sum + Number(i.service || 0) + Number(i.spare || 0),
     0
   );
 
-  const grandTotal = subTotal
+  const grandTotal = subTotal;
 
-  /* ================= PAYMENT LABEL ================= */
   const paymentLabel =
     job.service?.paymentMode === "Cash"
       ? "CASH MEMO"
       : job.service?.paymentMode === "UPI"
-        ? "UPI BILL"
-        : job.service?.paymentMode === "Card"
-          ? "CARD BILL"
-          : "BILL";
+      ? "UPI BILL"
+      : job.service?.paymentMode === "Card"
+      ? "CARD BILL"
+      : "BILL";
 
-  /* ================= PDF ================= */
   const downloadPDF = () => {
     const element = document.getElementById("invoice");
     html2pdf().from(element).save(`Invoice-${job.jobSheetNo}.pdf`);
@@ -58,93 +55,69 @@ const InvoiceBill = () => {
 
   return (
     <>
+    <div
+  style={{
+    position: "absolute",
+    top: "50%",
+    left: "50%",
+    transform: "translate(-50%, -50%) rotate(-30deg)",
+    fontSize: "120px",
+    color: "rgba(0,0,0,0.05)",
+    fontWeight: "bold",
+    pointerEvents: "none",
+    userSelect: "none",
+    whiteSpace: "nowrap"
+  }}
+>
+  RADNUS
+</div>
       <style>
         {`
         @media print {
-          body { margin: 0; }
+          body { margin:0 }
+          .no-print{ display:none }
         }
-@media print {
-  body { margin: 0; }
-
-  .no-print {
-    display: none;
-  }
-}
-
-      `}
+        `}
       </style>
 
       <div
         id="invoice"
         style={{
-          width: "210mm",
-          minHeight: "297mm",
-          margin: "auto",
-          border: "2px solid black",
-          padding: "15px",
-          fontFamily: "Arial",
-        }}
+  width: "210mm",
+  minHeight: "297mm",
+  margin: "auto",
+  border: "2px solid black",
+  padding: "20px",
+  fontFamily: "Arial",
+  position: "relative",
+  overflow: "hidden"
+}}
       >
-        {/* ================= HEADER ================= */}
-        <div style={{ borderBottom: "1px solid black", paddingBottom: "10px" }}>
+        {/* HEADER */}
 
-          {/* TOP ROW */}
+        <div style={{ borderBottom: "1px solid black", paddingBottom: "10px" }}>
           <div
             style={{
               display: "flex",
               justifyContent: "space-between",
-              alignItems: "flex-start",
+              fontSize: "13px",
             }}
           >
-            {/* LEFT */}
-            <div style={{ width: "30%" }}>
+            <div>
               <b>{paymentLabel} / BILL</b>
             </div>
 
-            {/* CENTER (EMPTY SPACE FOR PERFECT ALIGN) */}
-            <div style={{ width: "40%" }}></div>
-
-            {/* RIGHT */}
-            <div
-              style={{
-                width: "30%",
-                textAlign: "right",
-                fontSize: "12px",
-                lineHeight: "1.6",
-              }}
-            >
-              <div>PHONE NO : 81222 73355</div>
-              <div>EMAIL : radnus@gmail.com</div>
-              <div>TIMINGS : 10AM to 7PM</div>
+            <div style={{ textAlign: "right" }}>
+              PHONE NO : 81222 73355 <br />
+              EMAIL : radnus@gmail.com <br />
+              TIMINGS : 10AM to 7PM
             </div>
           </div>
 
-          {/* 🔥 PERFECT CENTER LOGO */}
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              justifyContent: "center",
-              marginTop: "10px",
-              textAlign: "center",
-            }}
-          >
-            <img
-              src={Logo}
-              alt="logo"
-              style={{
-                height: "65px",
-                objectFit: "contain",
-              }}
-            />
+          <div style={{ textAlign: "center", marginTop: "10px" }}>
+            <img src={Logo} style={{ height: "65px" }} />
 
-            <h2
-              style={{
-                margin: "5px 0 0 0",
-                letterSpacing: "2px",
-              }}
-            >
+            <h2 style={{ margin: "5px 0", letterSpacing: "2px" }}>
               RADNUS COMMUNICATION
             </h2>
 
@@ -154,9 +127,15 @@ const InvoiceBill = () => {
           </div>
         </div>
 
+        {/* CUSTOMER */}
 
-        {/* ================= CUSTOMER ================= */}
-        <div style={{ display: "flex", justifyContent: "space-between", marginTop: "10px" }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            marginTop: "15px",
+          }}
+        >
           <div>
             <p>Customer : {job.customer?.name}</p>
             <p>Contact No : {job.customer?.contact}</p>
@@ -169,13 +148,24 @@ const InvoiceBill = () => {
           </div>
         </div>
 
-        {/* ================= TABLE ================= */}
-        <table style={{ width: "100%", borderCollapse: "collapse", marginTop: "15px" }}>
+        {/* TABLE */}
+
+        <table
+          style={{
+            width: "100%",
+            borderCollapse: "collapse",
+            marginTop: "15px",
+          }}
+        >
           <thead>
             <tr>
-              {["Make", "Model", "IMEI", "Fault", "Service", "Spare"].map((h, i) => (
-                <th key={i} style={th}>{h}</th>
-              ))}
+              {["Make", "Model", "IMEI", "Fault", "Service", "Spare"].map(
+                (h, i) => (
+                  <th key={i} style={th}>
+                    {h}
+                  </th>
+                )
+              )}
             </tr>
           </thead>
 
@@ -195,60 +185,92 @@ const InvoiceBill = () => {
           </tbody>
         </table>
 
-        {/* ================= TOTAL ================= */}
+        {/* TOTAL */}
+
         <div style={{ textAlign: "right", marginTop: "10px", fontSize: "15px" }}>
           <div>Sub Total : ₹{subTotal}</div>
           <b>Grand Total : ₹{grandTotal.toFixed(2)}</b>
         </div>
 
+        {/* TERMS (UNCHANGED) */}
+
         <div style={{ marginTop: "25px", fontSize: "15px" }}>
           <b>Terms and Conditions</b>
+
           <ol style={{ lineHeight: "1.8" }}>
             <li>Replaced parts will not be returned.</li>
             <li>Data may be lost during repair/software upgradation.</li>
-            <li>Company bears no responsibility, whatsoever if equipment is not collected within 45 days from the date of receipt.</li>
-            <li>Please make sure that you have removed your sim card and/or memory card from your phone. Gadget hub does not accept responsibility for loss of these items.</li>
-            <li>No delivery will be made without the customer's copy of the job order.</li>
-            <li>Company bears no responsibility, if any fault occurs on additional fault findings while servicing on booked complaints.</li>
+            <li>
+              Company bears no responsibility, whatsoever if equipment is not
+              collected within 45 days from the date of receipt.
+            </li>
+            <li>
+              Please make sure that you have removed your sim card and/or memory
+              card from your phone. Gadget hub does not accept responsibility
+              for loss of these items.
+            </li>
+            <li>
+              No delivery will be made without the customer's copy of the job
+              order.
+            </li>
+            <li>
+              Company bears no responsibility, if any fault occurs on additional
+              fault findings while servicing on booked complaints.
+            </li>
             <li>Only checking warranty for all services and spares used.</li>
           </ol>
 
           <b>விதிமுறைகள்</b>
+
           <ol style={{ lineHeight: "1.8" }}>
             <li>மாற்றப்பட்ட உதிரிப்பாகங்கள் திருப்பி வழங்கப்படமாட்டாது.</li>
-            <li>பழுது பார்க்கும்போது / சாப்ட்வேர் அப்டேட் செய்யும் போது தகவல்கள் இழக்க நேரிடலாம்.</li>
-            <li>பெறப்பட்ட நாளிலிருந்து 45 நாட்களுக்குள் பொருள் பெறப்படாவிட்டால் நிறுவனம் பொறுப்பல்ல.</li>
-            <li>தயவுசெய்து உங்கள் சிம் கார்டு மற்றும் மெமரி கார்டை அகற்றி வழங்கவும்.</li>
-            <li>வேலை ஒப்பந்த நகல் இல்லாமல் பொருள் வழங்கப்படமாட்டாது.</li>
-            <li>சரிசெய்யும் போது புதிய குறைகள் ஏற்பட்டால் நிறுவனம் பொறுப்பல்ல.</li>
-            <li>சேவை மற்றும் உதிரிப்பாகங்களுக்கு மட்டுமே உத்தரவாதம் வழங்கப்படும்.</li>
+            <li>
+              பழுது பார்க்கும்போது / சாப்ட்வேர் அப்டேட் செய்யும் போது தகவல்கள்
+              இழக்க நேரிடலாம்.
+            </li>
+            <li>
+              பெறப்பட்ட நாளிலிருந்து 45 நாட்களுக்குள் பொருள் பெறப்படாவிட்டால்
+              நிறுவனம் பொறுப்பல்ல.
+            </li>
+            <li>
+              தயவுசெய்து உங்கள் சிம் கார்டு மற்றும் மெமரி கார்டை அகற்றி
+              வழங்கவும்.
+            </li>
+            <li>
+              வேலை ஒப்பந்த நகல் இல்லாமல் பொருள் வழங்கப்படமாட்டாது.
+            </li>
+            <li>
+              சரிசெய்யும் போது புதிய குறைகள் ஏற்பட்டால் நிறுவனம் பொறுப்பல்ல.
+            </li>
+            <li>
+              சேவை மற்றும் உதிரிப்பாகங்களுக்கு மட்டுமே உத்தரவாதம் வழங்கப்படும்.
+            </li>
           </ol>
         </div>
 
-
         {/* SIGN */}
+
         <div style={{ textAlign: "right", marginTop: "40px" }}>
           Authorized Signature
         </div>
       </div>
 
-      {/* ================= BUTTONS ================= */}
+      {/* BUTTONS */}
+
       <div className="no-print" style={{ textAlign: "center", marginTop: "15px" }}>
         <button onClick={() => window.print()}>🖨 Print</button>
+
         <button onClick={downloadPDF} style={{ marginLeft: "10px" }}>
           📥 Download PDF
         </button>
+
         <button
           style={{ marginLeft: "10px" }}
-          className="btn btn-dark btn-sm"
           onClick={async () => {
             try {
-              await axios.post(
-                `${API}/api/jobsheets/send-invoice/${job._id}`
-               );
-
+              await axios.post(`${API}/api/jobsheets/send-invoice/${job._id}`);
               alert("Invoice Sent Successfully ✅");
-            } catch (err) {
+            } catch {
               alert("Email Failed ❌");
             }
           }}
@@ -260,7 +282,6 @@ const InvoiceBill = () => {
   );
 };
 
-/* ================= STYLES ================= */
 const th = {
   border: "2px solid black",
   borderRight: "1px dotted black",
