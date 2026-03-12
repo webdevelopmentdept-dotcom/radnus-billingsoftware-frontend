@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router-dom";
 
-const JobSheetSearchModal = ({ data, onClose }) => {
+const JobSheetSearchModal = ({ data = [], onClose }) => {
   const navigate = useNavigate();
 
   return (
@@ -24,46 +24,69 @@ const JobSheetSearchModal = ({ data, onClose }) => {
         }}
       >
         {/* HEADER */}
-        <div className="d-flex justify-content-between align-items-center p-2 border-bottom">
+        <div className="d-flex justify-content-between align-items-center p-3 border-bottom">
           <h5 className="m-0">Job Sheets</h5>
-          <button className="btn btn-sm btn-outline-danger" onClick={onClose}>
+
+          <button
+            className="btn btn-sm btn-outline-danger"
+            onClick={onClose}
+          >
             ✕
           </button>
         </div>
 
         {/* BODY */}
         <div className="p-3">
-          <table className="table table-sm table-hover">
-            <thead>
+
+          <table className="table table-sm table-hover align-middle">
+            <thead className="table-light">
               <tr>
                 <th>Job No</th>
                 <th>Customer</th>
                 <th>Status</th>
                 <th>Date</th>
-                <th></th>
+                <th>Action</th>
               </tr>
             </thead>
+
             <tbody>
-              {data.map(js => (
-                <tr key={js._id}>
-                  <td>{js.jobSheetNo}</td>
-                  <td>{js.customer?.name}</td>
-                  <td>{js.device?.mobileStatus}</td>
-                  <td>{new Date(js.createdAt).toLocaleDateString()}</td>
-                  <td>
-                    <button
-                      className="btn btn-sm btn-primary"
-                      onClick={() => navigate(`/jobsheet/${js._id}`)}
-                    >
-                      Open
-                    </button>
+              {data.length > 0 ? (
+                data.map((js) => (
+                  <tr key={js._id}>
+                    <td>{js.jobSheetNo}</td>
+
+                    <td>{js.customer?.name || "-"}</td>
+
+                    <td>{js.device?.mobileStatus || "-"}</td>
+
+                    <td>
+                      {js.createdAt
+                        ? new Date(js.createdAt).toLocaleDateString()
+                        : "-"}
+                    </td>
+
+                    <td>
+                      <button
+                        className="btn btn-sm btn-primary"
+                        onClick={() => navigate(`/jobsheet/${js._id}`)}
+                      >
+                        Open
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan="5" className="text-center text-muted py-4">
+                    No Job Sheets Found
                   </td>
                 </tr>
-              ))}
+              )}
             </tbody>
-          </table>
-        </div>
 
+          </table>
+
+        </div>
       </div>
     </div>
   );
