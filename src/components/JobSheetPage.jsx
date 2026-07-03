@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from "react";
-
 import AdvancePopup from "./AdvancePopup";
 import axios from "axios";
 import makeModelData from "../data/makeModelData";
@@ -35,7 +34,7 @@ const [cancelling, setCancelling] = useState(false);
   const [formErrors, setFormErrors] = useState({});
  
 
-  // ✅ FIX 1: Null/undefined/empty string check strict-ஆ பண்ணு
+
 const validateField = (name, value) => {
   switch (name) {
     case "customerName":
@@ -181,8 +180,6 @@ useEffect(() => {
   };
 
 
-
-
 /* ── WORKLOAD MAP: { "Barani": 4, "Ajith": 5 } ── */
   const [workloadMap, setWorkloadMap] = useState({});
  
@@ -239,30 +236,14 @@ const [margin, setMargin] = useState("");
 
 
 
-
-
-useEffect(() => {
-  const est = Number(estimate || 0);
-  const spare = Number(spareCharge || 0);
-  if (est > 0 || spare > 0) {
-    setMargin(String(est - spare));
-  }
-}, [estimate, spareCharge]);
-
-
 useEffect(() => {
   const service = Number(serviceCharge || 0);
   const spare = Number(spareCharge || 0);
-  if (service > 0 || spare > 0) {
-    const est = service + spare;
-    setEstimate(String(est));
-    setMargin(String(est - spare)); // margin = estimate - spare = service charge
-  }
+  const est = service + spare;
+
+  setEstimate(est > 0 ? String(est) : "");
+  setMargin(est > 0 ? String(est - spare) : "");
 }, [serviceCharge, spareCharge]);
-
-
-
-
 
 
 
@@ -364,12 +345,9 @@ const handleUpdate = async () => {
       { headers: { "Content-Type": "multipart/form-data" } }
     );
 
-    // ✅ KEY FIX — response data-வை localEditData-க்கு set பண்ணு
-    // இதுல advanceDate updated value DB-லிருந்து வரும்
     const updatedJob = res.data?.job || res.data;
     setLocalEditData(updatedJob);
 
-    // ✅ advanceDate response-லிருந்து re-set பண்ணு
     if (updatedJob?.service?.advanceDate) {
       setAdvanceDate(updatedJob.service.advanceDate.slice(0, 10));
     }
@@ -446,9 +424,7 @@ const handleSave = async () => {
     } finally {
       setSaving(false);
     }
-  }; // ← handleSave ends here
-
-  /* ================= NEW ================= */
+  }; 
 // handleUpdate-ல் top-ல்:
 console.log("advanceItems being saved:", advanceItems);
 console.log("advanceAmount:", advanceAmount);
@@ -531,7 +507,7 @@ if (!engineerList.length) return;  // ← ADD THIS
   setIdProofPreview(editData.idProofImage || "");
   setMobileStatus(editData.device?.mobileStatus || "");
 
-  // ✅ KEY FIX: advanceDate — ISO string-ஐ "YYYY-MM-DD" format-ல் set பண்ணு
+  
   const rawAdvDate = editData.service?.advanceDate;
   if (rawAdvDate) {
     const formatted = new Date(rawAdvDate).toISOString().split("T")[0];
@@ -565,7 +541,7 @@ if (!engineerList.length) return;  // ← ADD THIS
 
 
 
-// Visual issues மட்டும் faultList depend பண்ணுது
+
 useEffect(() => {
   if (!isEdit || !editData || !faultList.length) return;
 
@@ -682,108 +658,121 @@ const getWorkloadBadge = (engName) => {
   };
 };
   return (
-    <div className="container-fluid bg-light min-vh-100 p-3">
+<div className="container-fluid bg-light" style={{ paddingTop: "2px" }}>
 
+<div className="card" style={{ marginBottom: "10px", border: "1px solid #dee2e6", padding: "6px 16px" }}>
+  <div 
+    className="d-flex flex-wrap align-items-center" 
+    style={{ gap: "210px", lineHeight: "1" }}
+  >
+    <b className="fs-5" style={{ margin: 0 }}>Job Sheet</b>
+    <div style={{ margin: 0 }}><b>Job Sheet No:</b> <span className="text-primary">{jobSheetNo}</span></div>
+    <div style={{ margin: 0 }}><b>Date:</b> {now.toLocaleDateString()}</div>
+    <div style={{ margin: 0 }}><b>Time:</b> {now.toLocaleTimeString()}</div>
+  </div>
+</div>
 
-      {/* HEADER */}
-      <div className="card shadow-sm mb-3">
-        <div className="card-body d-flex justify-content-between flex-wrap gap-3">
-          <b className="fs-5">Job Sheet</b>
-          <div><b>Job Sheet No:</b> <span className="text-primary">{jobSheetNo}</span></div>
-          <div><b>Date:</b> {now.toLocaleDateString()}</div>
-          <div><b>Time:</b> {now.toLocaleTimeString()}</div>
-        </div>
+{/* SEARCH */}
+<div className="card shadow-sm" style={{ marginBottom: "9px 9px ", padding: "4px 16px" }}>
+  <div className="d-flex align-items-center flex-nowrap" style={{ fontSize: "13px", lineHeight: "1", gap: "48px" }}>
+
+    {/* Search Group */}
+    <div className="d-flex align-items-center" style={{ gap: "8px" }}>
+      <span className="fw-bold" style={{ whiteSpace: "nowrap", fontSize: "17px" }}>Search:</span>
+      <div style={{ width: "230px" }}>
+        <input
+          className="form-control form-control-sm"
+          placeholder="Job Sheet / IMEI / Contact / Name"
+          value={searchText}
+          onChange={(e) => setSearchText(e.target.value)}
+          style={{ padding: "2px 8px", height: "28px" }}
+        />
       </div>
+    </div>
 
-      {/* SEARCH */}
-      <div className="card shadow-sm mb-3">
-        <div className="card-header fw-bold">Search Job Sheet</div>
+    {/* Divider */}
+    <div style={{ width: "1px", height: "26px", }} />
 
-        <div className="card-body row g-2 align-items-end">
-
-          {/* SMART SEARCH */}
-          <div className="col-md-3">
-            <input
-              className="form-control form-control-sm"
-              placeholder="Job Sheet / IMEI / Contact / Name"
-              value={searchText}
-              onChange={(e) => setSearchText(e.target.value)}
-            />
-          </div>
-
-          {/* STATUS */}
-          <div className="col-md-2">
-            <select
-              className="form-select form-select-sm"
-              value={searchStatus}
-              onChange={(e) => setSearchStatus(e.target.value)}
-            >
-              <option value="">All Status</option>
-              <option value="Received">Received</option>
-              <option value="Pending">Pending</option>
-              <option value="Repaired">Repaired</option>
-              <option value="Delivered">Delivered</option>
-              <option value="Delivered NR/NA">Delivered NR/NA</option>
-                <option value="Cancelled">Cancelled</option> 
-            </select>
-          </div>
-
-          {/* FROM DATE */}
-          <div className="col-md-2">
-            <input
-              type="date"
-              className="form-control form-control-sm"
-              value={fromDate}
-              onChange={(e) => setFromDate(e.target.value)}
-            />
-          </div>
-
-          {/* TO DATE */}
-          <div className="col-md-2">
-            <input
-              type="date"
-              className="form-control form-control-sm"
-              value={toDate}
-              onChange={(e) => setToDate(e.target.value)}
-            />
-          </div>
-
-          {/* ACTION */}
-          <div className="col-md-3 d-flex gap-2">
-     <button
-  className="btn btn-primary d-flex align-items-center justify-content-center"
-  onClick={handleSearch}
-  disabled={searching}
-  style={{
-    fontSize: "16px",
-    padding: "14px 14px",
-    height: "35px",
-    minWidth: "100px",
-    width:"50%"
-  }}
->
-  {searching ? (
-    <>
-      <span
-        className="spinner-border spinner-border-sm me-2"
-        style={{ width: "14px", height: "14px" }}
-        role="status"
-        aria-hidden="true"
-      />
-      Searching...
-    </>
-  ) : (
-    "Search"
-  )}
-</button>
-            
-
-
-        
-          </div>
-
-        </div>
+    {/* Status Group */}
+    <div className="d-flex align-items-center" style={{ gap: "4px" }}>
+      <span className="fw-bold text-secondary" style={{ whiteSpace: "nowrap", fontSize: "14px" }}>Status:</span>
+      <div style={{ width: "100px" }}>
+        <select
+          className="form-select form-select-sm"
+          value={searchStatus}
+          onChange={(e) => setSearchStatus(e.target.value)}
+          style={{ padding: "2px 8px", height: "28px" }}
+        >
+          <option value="">All</option>
+          <option value="Received">Received</option>
+          <option value="Pending">Pending</option>
+          <option value="Repaired">Repaired</option>
+          <option value="Delivered">Delivered</option>
+          <option value="Delivered NR/NA">Delivered NR/NA</option>
+          <option value="Cancelled">Cancelled</option>
+        </select>
       </div>
+    </div>
+
+    {/* Divider */}
+    <div style={{ width: "1px", height: "26px",  }} />
+
+    {/* From Date Group */}
+    <div className="d-flex align-items-center" style={{ gap: "4px" }}>
+      <span className="fw-bold text-secondary" style={{ whiteSpace: "nowrap", fontSize: "14px" }}>From:</span>
+      <div style={{ width: "130px" }}>
+        <input
+          type="date"
+          className="form-control form-control-sm"
+          value={fromDate}
+          onChange={(e) => setFromDate(e.target.value)}
+          style={{ padding: "2px 8px", height: "28px" }}
+        />
+      </div>
+    </div>
+
+    {/* Divider */}
+    <div style={{ width: "1px", height: "26px", }} />
+
+    {/* To Date Group */}
+    <div className="d-flex align-items-center" style={{ gap: "4px" }}>
+      <span className="fw-bold text-secondary" style={{ whiteSpace: "nowrap", fontSize: "14px" }}>To:</span>
+      <div style={{ width: "130px" }}>
+        <input
+          type="date"
+          className="form-control form-control-sm"
+          value={toDate}
+          onChange={(e) => setToDate(e.target.value)}
+          style={{ padding: "2px 8px", height: "28px" }}
+        />
+      </div>
+    </div>
+
+    {/* Search Button */}
+    <button
+      className="btn btn-primary btn-sm"
+      onClick={handleSearch}
+      disabled={searching}
+      style={{ height: "28px", padding: "2px 16px", fontSize: "14px", lineHeight: "1" }}
+    >
+      {searching ? (
+        <>
+          <span
+            className="spinner-border spinner-border-sm me-1"
+            style={{ width: "10px", height: "10px" }}
+            role="status"
+            aria-hidden="true"
+          />
+          ...
+        </>
+      ) : (
+        "Search"
+      )}
+    </button>
+
+  </div>
+</div>
+
       {/* MAIN GRID */}
       <div className="row g-3">
 
