@@ -2,6 +2,11 @@ import React, { useState, useEffect } from "react";
 import axios from "axios";
 import * as XLSX from "xlsx";
 import { useNavigate } from "react-router-dom";
+import {
+  FileText, Search, RotateCcw, Download, Printer,
+  Instagram, Star, CheckCircle2, ThumbsUp, XCircle,
+  Inbox, StickyNote, Loader2, IndianRupee,
+} from "lucide-react";
 
 const AllReportPage = () => {
     const navigate = useNavigate(); 
@@ -80,8 +85,6 @@ const AllReportPage = () => {
       "Engineer":           item.service?.engineer || "-",
       "Dealer":             item.service?.dealer || "-",
       "Drawer":             item.service?.drawer || "-",
-      "Service Charge":     item.service?.serviceCharge || 0,
-      "Spare Charge":       item.service?.spareCharge || 0,
       "Total":              (Number(item.service?.serviceCharge || 0) + Number(item.service?.spareCharge || 0)),
       "Payment Mode":       item.service?.paymentMode || "-",
       "Estimate":           item.service?.estimate || "-",
@@ -90,20 +93,14 @@ const AllReportPage = () => {
       "Problems":           item.visualIssues?.join(", ") || "-",
       "Physical Condition": item.physicalCondition?.join(", ") || "-",
       "Accessories":        item.accessories?.join(", ") || "-",
-      "Advance Amount":     item.service?.advanceAmount || 0,
-
-      "Advance Date": item.service?.advanceDate
-  ? new Date(item.service.advanceDate).toLocaleDateString("en-IN")
-  : "-",
       "Margin":             item.service?.margin || 0,
       "Remarks":            item.service?.remarks || "-",
-      // ✅ NEW
       "Insta Follow":       item.service?.instaFollowers || "-",
       "Google Review":      item.service?.googleReview || "-",
       "Cancel Remarks":     item.cancelRemarks || "-",
       "Cancelled By":       item.cancelledBy   || "-",
       "Created By":         item.createdBy?.name || item.createdBy?.username || "-",
-      "Service Rep":        item.service?.serviceRep || "-",   // ✅ ADD
+      "Service Rep":        item.service?.serviceRep || "-",
     }));
 
     const ws = XLSX.utils.json_to_sheet(rows);
@@ -111,10 +108,10 @@ const AllReportPage = () => {
       { wch: 6 },  { wch: 12 }, { wch: 12 }, { wch: 18 }, { wch: 13 },
       { wch: 13 }, { wch: 22 }, { wch: 22 }, { wch: 14 }, { wch: 16 },
       { wch: 17 }, { wch: 12 }, { wch: 16 }, { wch: 14 }, { wch: 16 },
-      { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 13 },
+      { wch: 12 }, { wch: 10 }, { wch: 13 },
       { wch: 14 }, { wch: 13 }, { wch: 14 }, { wch: 28 }, { wch: 28 },
-      { wch: 22 }, { wch: 22 }, { wch: 13 }, { wch: 12 }, { wch: 14 },
-      { wch: 14 }, { wch: 14 }, { wch: 14 }, 
+      { wch: 22 }, { wch: 13 }, { wch: 12 }, { wch: 14 },
+      { wch: 14 }, { wch: 14 }, 
     ];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "All Reports");
@@ -134,11 +131,11 @@ const AllReportPage = () => {
   const socialBadge = (val) => {
     if (!val || val === "-") return <span style={{ color: "#94a3b8" }}>—</span>;
     if (val === "Already Done")
-      return <span style={{ background: "#dbeafe", color: "#1e40af", padding: "2px 7px", borderRadius: 10, fontSize: 11, fontWeight: 600 }}>✅ Already Done</span>;
+      return <span style={{ background: "#dbeafe", color: "#1e40af", padding: "2px 7px", borderRadius: 10, fontSize: 11, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 4 }}><CheckCircle2 size={12} /> Already Done</span>;
     if (val === "Yes")
-      return <span style={{ background: "#d1fae5", color: "#065f46", padding: "2px 7px", borderRadius: 10, fontSize: 11, fontWeight: 600 }}>👍 Yes</span>;
+      return <span style={{ background: "#d1fae5", color: "#065f46", padding: "2px 7px", borderRadius: 10, fontSize: 11, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 4 }}><ThumbsUp size={12} /> Yes</span>;
     if (val === "No")
-      return <span style={{ background: "#fee2e2", color: "#991b1b", padding: "2px 7px", borderRadius: 10, fontSize: 11, fontWeight: 600 }}>❌ No</span>;
+      return <span style={{ background: "#fee2e2", color: "#991b1b", padding: "2px 7px", borderRadius: 10, fontSize: 11, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 4 }}><XCircle size={12} /> No</span>;
     return <span style={{ fontSize: 11 }}>{val}</span>;
   };
 
@@ -146,16 +143,15 @@ const AllReportPage = () => {
   const totalSpare   = filteredData.reduce((s, i) => s + Number(i.service?.spareCharge || 0), 0);
   const totalAmount  = totalService + totalSpare;
 
-  // ✅ Updated headers — added Insta & Google
   const headers = [
     "SL", "Date", "Job No", "Name", "Contact", "Alt Contact",
     "Make", "Model", "IMEI", "Warranty", "Status",
     "Engineer", "Dealer", "Drawer",
-    "Svc ₹", "Spare ₹", "Total ₹", "Payment",
+    "Total ₹", "Payment",
     "Problems", "Physical Cond.", "Accessories",
-    "Repair Date", "Delivery Date", "Advance ₹","Adv. Date", "Margin ₹", "Remarks",
-    "📸 Insta", "⭐ Google", // ✅ NEW
-     "Service Rep", 
+    "Repair Date", "Delivery Date", "Margin ₹", "Remarks",
+    "Insta", "Google",
+    "Service Rep", 
     "Created By"
   ];
 
@@ -164,7 +160,9 @@ const AllReportPage = () => {
 
       {/* HEADER */}
       <div style={{ marginBottom: "16px" }}>
-        <h2 style={{ margin: 0, color: "#1e293b", fontWeight: 700 }}>📋 All Reports</h2>
+        <h2 style={{ margin: 0, color: "#1e293b", fontWeight: 700, display: "flex", alignItems: "center", gap: 8 }}>
+          <FileText size={22} /> All Reports
+        </h2>
         <p style={{ margin: 0, color: "#64748b", fontSize: "13px" }}>Complete job sheet report overview</p>
       </div>
 
@@ -221,19 +219,20 @@ const AllReportPage = () => {
 
           <button onClick={fetchData} disabled={loading}
             style={{ background: "#2563eb", color: "#fff", border: "none", borderRadius: "8px", padding: "8px 18px", fontWeight: 600, fontSize: "13px", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px" }}>
-            {loading ? "⏳ Loading..." : "🔍 Apply Filter"}
+            {loading ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
+            {loading ? "Loading..." : "Apply Filter"}
           </button>
           <button onClick={handleReset}
-            style={{ background: "#64748b", color: "#fff", border: "none", borderRadius: "8px", padding: "8px 14px", fontWeight: 600, fontSize: "13px", cursor: "pointer" }}>
-            ↺ Reset
+            style={{ background: "#64748b", color: "#fff", border: "none", borderRadius: "8px", padding: "8px 14px", fontWeight: 600, fontSize: "13px", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px" }}>
+            <RotateCcw size={14} /> Reset
           </button>
           <button onClick={handleExcelDownload}
-            style={{ background: "#16a34a", color: "#fff", border: "none", borderRadius: "8px", padding: "8px 14px", fontWeight: 600, fontSize: "13px", cursor: "pointer" }}>
-            📥 Excel Download
+            style={{ background: "#16a34a", color: "#fff", border: "none", borderRadius: "8px", padding: "8px 14px", fontWeight: 600, fontSize: "13px", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px" }}>
+            <Download size={14} /> Excel Download
           </button>
           <button onClick={handlePrint}
-            style={{ background: "#0891b2", color: "#fff", border: "none", borderRadius: "8px", padding: "8px 14px", fontWeight: 600, fontSize: "13px", cursor: "pointer" }}>
-            🖨️ Print
+            style={{ background: "#0891b2", color: "#fff", border: "none", borderRadius: "8px", padding: "8px 14px", fontWeight: 600, fontSize: "13px", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px" }}>
+            <Printer size={14} /> Print
           </button>
         </div>
       </div>
@@ -241,15 +240,13 @@ const AllReportPage = () => {
       {/* SUMMARY ROW */}
       <div style={{ display: "flex", gap: "12px", marginBottom: "14px", flexWrap: "wrap" }}>
         {[
-          { label: "Total Records",  value: filteredData.length,                         color: "#2563eb" },
-          { label: "Service Charge", value: `₹${totalService.toLocaleString("en-IN")}`, color: "#7c3aed" },
-          { label: "Spare Charge",   value: `₹${totalSpare.toLocaleString("en-IN")}`,   color: "#db2777" },
-          { label: "Total Amount",   value: `₹${totalAmount.toLocaleString("en-IN")}`,  color: "#059669" },
-         { label: "📸 Instagram", value: filteredData.filter(i => i.service?.instaFollowers === "Yes").length, color: "#e11d48" },
-{ label: "⭐ Google Review", value: filteredData.filter(i => i.service?.googleReview === "Yes").length, color: "#d97706" },
+          { label: "Total Records", icon: <FileText size={12} />, value: filteredData.length, color: "#2563eb" },
+        
+          { label: "Instagram",     icon: <Instagram size={12} />, value: filteredData.filter(i => i.service?.instaFollowers === "Yes").length, color: "#e11d48" },
+          { label: "Google Review", icon: <Star size={12} />, value: filteredData.filter(i => i.service?.googleReview === "Yes").length, color: "#d97706" },
         ].map((s, i) => (
           <div key={i} style={{ background: "#fff", borderRadius: "10px", padding: "10px 18px", boxShadow: "0 1px 4px rgba(0,0,0,0.07)", minWidth: "140px" }}>
-            <div style={{ fontSize: "11px", color: "#64748b", fontWeight: 600 }}>{s.label}</div>
+            <div style={{ fontSize: "11px", color: "#64748b", fontWeight: 600, display: "flex", alignItems: "center", gap: 4 }}>{s.icon} {s.label}</div>
             <div style={{ fontSize: "20px", fontWeight: 700, color: s.color }}>{s.value}</div>
           </div>
         ))}
@@ -274,7 +271,9 @@ const AllReportPage = () => {
 
             <tbody>
               {loading ? (
-                <tr><td colSpan={headers.length} style={{ textAlign: "center", padding: "40px", color: "#64748b" }}>⏳ Loading...</td></tr>
+                <tr><td colSpan={headers.length} style={{ textAlign: "center", padding: "40px", color: "#64748b" }}>
+                  <Loader2 size={16} className="animate-spin" style={{ display: "inline", marginRight: 6, verticalAlign: "middle" }} /> Loading...
+                </td></tr>
               ) : filteredData.length > 0 ? (
                 filteredData.map((item, index) => {
                   const svc   = Number(item.service?.serviceCharge || 0);
@@ -305,16 +304,14 @@ const AllReportPage = () => {
                           {item.device?.mobileStatus || "-"}
                         </span>
                         {item.isCancelled && item.cancelRemarks && (
-                          <div style={{ fontSize: 10, color: "#dc3545", marginTop: 3, whiteSpace: "normal", maxWidth: 120 }}>
-                            📝 {item.cancelRemarks}
+                          <div style={{ fontSize: 10, color: "#dc3545", marginTop: 3, whiteSpace: "normal", maxWidth: 120, display: "flex", alignItems: "flex-start", gap: 3 }}>
+                            <StickyNote size={11} style={{ flexShrink: 0, marginTop: 1 }} /> {item.cancelRemarks}
                           </div>
                         )}
                       </td>
                       <td style={td}>{item.service?.engineer || "-"}</td>
                       <td style={td}>{item.service?.dealer || "-"}</td>
                       <td style={td}>{item.service?.drawer || "-"}</td>
-                      <td style={{ ...td, color: "#7c3aed", fontWeight: 600 }}>₹{svc.toLocaleString("en-IN")}</td>
-                      <td style={{ ...td, color: "#db2777", fontWeight: 600 }}>₹{spare.toLocaleString("en-IN")}</td>
                       <td style={{ ...td, color: "#059669", fontWeight: 700 }}>₹{(svc + spare).toLocaleString("en-IN")}</td>
                       <td style={td}>{item.service?.paymentMode || "-"}</td>
                       <td style={{ ...td, maxWidth: "160px", whiteSpace: "normal", wordBreak: "break-word" }}>{item.visualIssues?.filter(Boolean).join(", ") || "-"}</td>
@@ -322,21 +319,10 @@ const AllReportPage = () => {
                       <td style={{ ...td, maxWidth: "120px", whiteSpace: "normal", wordBreak: "break-word" }}>{item.accessories?.join(", ") || "-"}</td>
                       <td style={td}>{item.service?.repairDate ? new Date(item.service.repairDate).toLocaleDateString("en-IN") : "-"}</td>
                       <td style={td}>{item.service?.deliveryDate ? new Date(item.service.deliveryDate).toLocaleDateString("en-IN") : "-"}</td>
-                      <td style={{ ...td, color: "#0369a1", fontWeight: 600 }}>
-                        {item.service?.advanceAmount ? `₹${Number(item.service.advanceAmount).toLocaleString("en-IN")}` : "-"}
-                      </td>
-
-
-                      <td style={{ ...td, color: "#0369a1", fontSize: 11 }}>
-  {item.service?.advanceDate
-    ? new Date(item.service.advanceDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" })
-    : "-"}
-</td>
                       <td style={{ ...td, color: "#059669", fontWeight: 600 }}>
                         {item.service?.margin ? `₹${Number(item.service.margin).toLocaleString("en-IN")}` : "-"}
                       </td>
                       <td style={{ ...td, maxWidth: "140px", whiteSpace: "normal", wordBreak: "break-word" }}>{item.service?.remarks || "-"}</td>
-                      {/* ✅ NEW: Insta & Google columns */}
                       <td style={{ ...td, textAlign: "center" }}>{socialBadge(item.service?.instaFollowers)}</td>
                       <td style={{ ...td, textAlign: "center" }}>{socialBadge(item.service?.googleReview)}</td>
 
@@ -348,21 +334,21 @@ const AllReportPage = () => {
                   );
                 })
               ) : (
-                <tr><td colSpan={headers.length} style={{ textAlign: "center", padding: "50px", color: "#94a3b8", fontSize: "15px" }}>📭 No Data Found</td></tr>
+                <tr><td colSpan={headers.length} style={{ textAlign: "center", padding: "50px", color: "#94a3b8", fontSize: "15px" }}>
+                  <Inbox size={20} style={{ display: "inline", marginRight: 6, verticalAlign: "middle" }} /> No Data Found
+                </td></tr>
               )}
             </tbody>
 
-            {/* FOOTER — colSpan 14 covers cols 0-13, then Svc/Spare/Total at 14/15/16 */}
+            {/* FOOTER — colSpan 14 covers cols 0-13, then Total ₹ at 14, then colSpan 12 for the rest */}
             {filteredData.length > 0 && (
               <tfoot>
                 <tr style={{ background: "#1e293b", color: "#fff", fontWeight: 700 }}>
                   <td colSpan="14" style={{ padding: "10px 8px", textAlign: "right", fontSize: "12px" }}>
                     TOTAL ({filteredData.length} records):
                   </td>
-                  <td style={{ padding: "10px 8px", color: "#c4b5fd" }}>₹{totalService.toLocaleString("en-IN")}</td>
-                  <td style={{ padding: "10px 8px", color: "#f9a8d4" }}>₹{totalSpare.toLocaleString("en-IN")}</td>
                   <td style={{ padding: "10px 8px", color: "#6ee7b7" }}>₹{totalAmount.toLocaleString("en-IN")}</td>
-                  <td colSpan="14"></td>
+                  <td colSpan="12"></td>
                 </tr>
               </tfoot>
             )}

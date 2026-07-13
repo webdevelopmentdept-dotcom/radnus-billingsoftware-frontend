@@ -1,17 +1,75 @@
+
+
 import React, { useState, useEffect } from "react";
 import axios from "axios";
 import * as XLSX from "xlsx";
-
+import {
+  FileText, Wallet, Wrench, Cog, IndianRupee,
+  Package, HandCoins, Scale, Printer, Download,
+  Calendar, RotateCcw,
+} from "lucide-react";
 const ValueReport = () => {
   const today = new Date().toISOString().split("T")[0];
   const [fromDate, setFromDate] = useState(today);
   const [toDate, setToDate] = useState(today);
   const [data, setData] = useState([]);
-  const [loading, setLoading] = useState(false);
+ const [loading, setLoading] = useState(false);
+  const [highlightKey, setHighlightKey] = useState(null);
+  const [pendingJump, setPendingJump] = useState(null); 
+
+ const jumpToEntry = (jobSheetNo, date, type) => {
+    if (!date) return;
+    const id = `entry-${jobSheetNo}-${date}-${type}`;
+
+    // Already visible-ah irundha direct-ah scroll pannidalam
+    const el = document.getElementById(id);
+    if (el) {
+      scrollAndHighlight(id);
+      return;
+    }
+
+    // Illana — date filter range-ah expand pannunga, andha date cover aaganum
+    let newFrom = fromDate;
+    let newTo = toDate;
+    if (fromDate && date < fromDate) newFrom = date;
+    if (toDate && date > toDate) newTo = date;
+
+    if (newFrom !== fromDate) setFromDate(newFrom);
+    if (newTo !== toDate) setToDate(newTo);
+
+    // Filter maarina pinnadi table re-render aagum, appuram jump pannanum
+    setPendingJump(id);
+  };
+const scrollAndHighlight = (id) => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      setHighlightKey(id);
+      setTimeout(() => setHighlightKey(null), 2000);
+    }
+  };
+
+  const extractDateFromKey = (key) => {
+    if (!key) return null;
+    const match = key.match(/(\d{4}-\d{2}-\d{2})/);
+    return match ? match[1] : null;
+  };
+
   const API = import.meta.env.VITE_API_URL;
 
   useEffect(() => { fetchReport(); }, []);
-
+useEffect(() => {
+    if (!pendingJump) return;
+    // filter state update aagi, table re-render aaganum ku konjam wait pannunga
+    const t1 = requestAnimationFrame(() => {
+      const t2 = requestAnimationFrame(() => {
+        scrollAndHighlight(pendingJump);
+        setPendingJump(null);
+      });
+      return () => cancelAnimationFrame(t2);
+    });
+    return () => cancelAnimationFrame(t1);
+  }, [pendingJump, fromDate, toDate, data]);
   const fetchReport = async () => {
     setLoading(true);
     try {
@@ -32,87 +90,157 @@ const ValueReport = () => {
     fetchReport();
   };
 
-  /* ================= BUILD ROWS ================= */
-  const buildRows = (jobsheets) => {
+
+
+
+const buildRows = (jobsheets) => {
     const rows = [];
 
     jobsheets.forEach((item) => {
-      const repairDate    = item.service?.repairDate?.slice(0, 10) || "";
-      const deliveryDate  = item.service?.deliveryDate?.slice(0, 10) || "-";
-      const name          = item.customer?.name || "";
-      const jobSheetNo    = item.jobSheetNo || "";
-      const serviceCharge = Number(item.service?.serviceCharge || 0);
-      const spareCharge   = Number(item.service?.spareCharge   || 0);
-      const jobTotal      = serviceCharge + spareCharge;
+      const name         = item.customer?.name || "";
+      const jobSheetNo   = item.jobSheetNo || "";
+      const repairDate   = item.service?.repairDate?.slice(0, 10) || "";
+      const deliveryDate = item.service?.deliveryDate?.slice(0, 10) || "-";
 
-      const advanceItems = item.service?.advanceItems || [];
-      let totalAdvancePaid = 0;
-      if (advanceItems.length > 0) {
-        totalAdvancePaid = advanceItems.reduce((s, a) => s + Number(a.amount || 0), 0);
+      const revenueEntries = item.service?.revenueEntries || [];
+      const advanceItems   = item.service?.advanceItems || [];
+      const spareItemsArr  = item.spareItems || [];
+      const othersItemsArr = item.service?.othersItems || [];
+
+      const dateBucket = {};
+      const addToBucket = (date, field, amount) => {
+        if (!amount || amount <= 0) return;
+        const d = date || repairDate;
+        if (!dateBucket[d]) dateBucket[d] = { service: 0, spare: 0, income: 0, others: 0 };
+        dateBucket[d][field] += amount;
+      };
+
+      if (revenueEntries.length > 0) {
+        revenueEntries.forEach((entry) => {
+          const d = entry.date ? new Date(entry.date).toISOString().slice(0, 10) : repairDate;
+          addToBucket(d, "service", Number(entry.service || 0));
+          addToBucket(d, "income",  Number(entry.income  || 0));
+        });
       } else {
-        totalAdvancePaid = Number(item.service?.advanceAmount || 0);
+        addToBucket(repairDate, "service", Number(item.service?.serviceCharge || 0));
+        addToBucket(repairDate, "income",  Number(item.service?.income        || 0));
       }
 
+      if (spareItemsArr.length > 0) {
+        spareItemsArr.forEach((si) => {
+          const d = si.date ? new Date(si.date).toISOString().slice(0, 10) : repairDate;
+          addToBucket(d, "spare", Number(si.amount || 0));
+        });
+      } else {
+        addToBucket(repairDate, "spare", Number(item.service?.spareCharge || 0));
+      }
+
+      if (othersItemsArr.length > 0) {
+        othersItemsArr.forEach((oi) => {
+          const d = oi.date ? new Date(oi.date).toISOString().slice(0, 10) : repairDate;
+          addToBucket(d, "others", Number(oi.amount || 0));
+        });
+      } else {
+        addToBucket(repairDate, "others", Number(item.service?.othersAmount || 0));
+      }
+
+      const dateRows = Object.keys(dateBucket).map((d) => {
+        const b = dateBucket[d];
+        return { date: d, ...b, rowTotal: b.service + b.spare + b.income + b.others };
+      }).filter((r) => r.rowTotal > 0);
+
+      const balanceableTotal = dateRows.reduce((s, r) => s + r.service + r.income, 0);
+      const jobTotal = dateRows.reduce((s, r) => s + r.rowTotal, 0);
+
+      // ── Advance events ──
+      let advanceEvents = [];
+      if (advanceItems.length > 0) {
+        advanceItems.forEach((adv) => {
+          const advDate = adv.date ? new Date(adv.date).toISOString().slice(0, 10) : repairDate;
+          const advAmt = Number(adv.amount || 0);
+          if (advAmt > 0) advanceEvents.push({ date: advDate, amount: advAmt, label: adv.label || "-" });
+        });
+      } else {
+        const advAmt  = Number(item.service?.advanceAmount || 0);
+        const advDate = item.service?.advanceDate
+          ? new Date(item.service.advanceDate).toISOString().slice(0, 10)
+          : repairDate;
+        if (advAmt > 0) advanceEvents.push({ date: advDate, amount: advAmt, label: "-" });
+      }
+
+      const totalAdvancePaid = advanceEvents.reduce((s, a) => s + a.amount, 0);
       const hasAdvance = totalAdvancePaid > 0;
 
-      if (!hasAdvance && (serviceCharge > 0 || spareCharge > 0)) {
-        rows.push({
-          date: repairDate, jobSheetNo, name,
-          type: "service", label: "-",
-          service: serviceCharge, spare: spareCharge,
-          advance: 0, collected: jobTotal, balance: null,
-          jobTotal, hasAdvance: false, hideRow: false,
-          rowTotal: jobTotal, repairDate, deliveryDate,
-        });
-      }
+      // ── ELLAM SERTHU oru single chronological timeline (date order-la) ──
+      const events = [
+        ...dateRows.map((r) => ({ ...r, kind: "charge" })),
+        ...advanceEvents.map((a) => ({ ...a, kind: "advance" })),
+      ].sort((a, b) => a.date.localeCompare(b.date));
 
-      if (hasAdvance) {
-        if (serviceCharge > 0 || spareCharge > 0) {
-          rows.push({
-            date: repairDate, jobSheetNo, name,
+   // ── Timeline walk pannunga — ovvoru event-kum, ADHUKKU MUNNADI cumulative + source-date track pannunga ──
+      let cumService = 0, cumSpare = 0, cumIncome = 0, cumOthers = 0, cumAdvance = 0;
+      let srcServiceKey = null, srcSpareKey = null, srcIncomeKey = null, srcOthersKey = null, srcAdvanceKey = null;
+
+      events.forEach((e) => {
+        const priorService = cumService, priorSpare = cumSpare, priorIncome = cumIncome,
+              priorOthers  = cumOthers,  priorAdvance = cumAdvance;
+        const priorServiceKey = srcServiceKey, priorSpareKey = srcSpareKey,
+              priorIncomeKey  = srcIncomeKey,  priorOthersKey = srcOthersKey,
+              priorAdvanceKey = srcAdvanceKey;
+
+        if (e.kind === "charge") {
+          const rowKey = `entry-${jobSheetNo}-${e.date}-service`;   // ✅ exact ID stored here
+          const balanceablePart = e.service + e.income;
+          const immediatePart   = e.spare + e.others;
+      rows.push({
+            date: e.date, jobSheetNo, name,
             type: "service", label: "-",
-            service: serviceCharge, spare: spareCharge,
-            advance: 0, collected: 0, balance: null,
-            jobTotal, hasAdvance: true, hideRow: true,
-            rowTotal: 0, repairDate, deliveryDate,
+            service: e.service, spare: e.spare, income: e.income, others: e.others,
+            advance: 0,
+            collected: immediatePart + (hasAdvance ? 0 : balanceablePart),
+            balance: null,
+            jobTotal, hasAdvance, hideRow: false,
+            rowTotal: e.rowTotal, repairDate, deliveryDate,
+            priorService, priorSpare, priorIncome, priorOthers, priorAdvance,
+            priorServiceKey, priorSpareKey, priorIncomeKey, priorOthersKey, priorAdvanceKey,
+            priorServiceDate: extractDateFromKey(priorServiceKey),
+            priorSpareDate:   extractDateFromKey(priorSpareKey),
+            priorIncomeDate:  extractDateFromKey(priorIncomeKey),
+            priorOthersDate:  extractDateFromKey(priorOthersKey),
+            priorAdvanceDate: extractDateFromKey(priorAdvanceKey),
           });
-        }
-
-        let cumulativePaid = 0;
-        const pushAdvance = (advAmt, advDate, label) => {
-          cumulativePaid += advAmt;
-          const remainingBalance = Math.max(0, jobTotal - cumulativePaid);
+          cumService += e.service; cumSpare += e.spare; cumIncome += e.income; cumOthers += e.others;
+          if (e.service > 0) srcServiceKey = rowKey;
+          if (e.spare   > 0) srcSpareKey   = rowKey;
+          if (e.income  > 0) srcIncomeKey  = rowKey;
+          if (e.others  > 0) srcOthersKey  = rowKey;
+        } else {
+          const rowKey = `entry-${jobSheetNo}-${e.date}-advance`;   // ✅ exact ID stored here
+          cumAdvance += e.amount;
+          srcAdvanceKey = rowKey;
+          const remainingBalance = Math.max(0, balanceableTotal - cumAdvance);
           rows.push({
-            date: advDate, jobSheetNo, name,
-            type: "advance", label,
-            service: 0, spare: 0,
-            advance: advAmt, collected: advAmt,
+            date: e.date, jobSheetNo, name,
+            type: "advance", label: e.label,
+            service: 0, spare: 0, income: 0, others: 0,
+            advance: e.amount, collected: e.amount,
             balance: remainingBalance,
             jobTotal, hasAdvance: true, hideRow: false,
-            rowTotal: advAmt, repairDate, deliveryDate,
-            serviceRef: serviceCharge, spareRef: spareCharge,
+            rowTotal: e.amount, repairDate, deliveryDate,
+            priorService, priorSpare, priorIncome, priorOthers, priorAdvance,
+            priorServiceKey, priorSpareKey, priorIncomeKey, priorOthersKey, priorAdvanceKey,
+            priorServiceDate: extractDateFromKey(priorServiceKey),
+            priorSpareDate:   extractDateFromKey(priorSpareKey),
+            priorIncomeDate:  extractDateFromKey(priorIncomeKey),
+            priorOthersDate:  extractDateFromKey(priorOthersKey),
+            priorAdvanceDate: extractDateFromKey(priorAdvanceKey),
           });
-        };
-
-        if (advanceItems.length > 0) {
-          advanceItems.forEach((adv) => {
-            const advDate = adv.date ? new Date(adv.date).toISOString().slice(0, 10) : repairDate;
-            const advAmt = Number(adv.amount || 0);
-            if (advAmt > 0) pushAdvance(advAmt, advDate, adv.label || "-");
-          });
-        } else {
-          const advAmt  = Number(item.service?.advanceAmount || 0);
-          const advDate = item.service?.advanceDate
-            ? new Date(item.service.advanceDate).toISOString().slice(0, 10)
-            : repairDate;
-          if (advAmt > 0) pushAdvance(advAmt, advDate, "-");
         }
-      }
+      });
     });
 
     return rows;
   };
-
   /* ================= FILTER ================= */
   const getFilteredRows = () => {
     const rows = buildRows(data);
@@ -144,12 +272,13 @@ const ValueReport = () => {
 
   const allRows     = getFilteredRows();
   const groupedData = groupByDate(allRows);
-
-  const grandService   = allRows.reduce((s, r) => s + r.service,          0);
-  const grandSpare     = allRows.reduce((s, r) => s + r.spare,            0);
-  const grandAdvance   = allRows.reduce((s, r) => s + r.advance,          0);
-  const grandCollected = allRows.reduce((s, r) => s + (r.collected || 0), 0);
-  const grandPending   = allRows.reduce((s, r) => s + (r.balance ?? 0),   0);
+const grandService   = allRows.reduce((s, r) => s + r.service,          0);
+const grandSpare     = allRows.reduce((s, r) => s + r.spare,            0);
+const grandIncome    = allRows.reduce((s, r) => s + (r.income || 0),    0);
+const grandOthers    = allRows.reduce((s, r) => s + (r.others || 0),    0);
+const grandAdvance   = allRows.reduce((s, r) => s + r.advance,          0);
+const grandCollected = allRows.reduce((s, r) => s + (r.collected || 0), 0);
+const grandPending   = allRows.reduce((s, r) => s + (r.balance ?? 0),   0);
 
   /* ================= EXCEL DOWNLOAD ================= */
   const handleExcelDownload = () => {
@@ -159,13 +288,13 @@ const ValueReport = () => {
       const rows = groupedData[date];
 
       // Date header row
-      excelRows.push({
-        "Date": `📅 ${date}`,
-        "Job No": "", "Type": "", "Label": "", "Name": "",
-        "Repair Date": "", "Txn Date": "", "Delivery Date": "",
-        "Service ₹": "", "Spare ₹": "", "Advance ₹": "",
-        "Collected ₹": "", "Balance ₹": "",
-      });
+    excelRows.push({
+  "Date": `📅 ${date}`,
+  "Job No": "", "Type": "", "Label": "", "Name": "",
+  "Repair Date": "", "Txn Date": "", "Delivery Date": "",
+  "Service ₹": "", "Spare ₹": "", "Income ₹": "", "Others ₹": "", "Advance ₹": "",
+  "Collected ₹": "", "Balance ₹": "",
+});
 
       // Data rows
       rows.forEach((row) => {
@@ -173,61 +302,71 @@ const ValueReport = () => {
           : row.balance === 0 ? "Paid"
           : row.balance.toFixed(2);
 
-        excelRows.push({
-          "Date": date,
-          "Job No": row.jobSheetNo,
-          "Type": row.type === "advance" ? "Advance" : "Service",
-          "Label": row.label,
-          "Name": row.name,
-          "Repair Date": row.repairDate || "-",
-          "Txn Date": row.date,
-          "Delivery Date": row.deliveryDate,
-          "Service ₹": row.type === "advance"
-            ? (row.serviceRef > 0 ? `(${row.serviceRef})` : "-")
-            : (row.service > 0 ? row.service.toFixed(2) : "-"),
-          "Spare ₹": row.spare > 0 ? row.spare.toFixed(2) : "-",
-          "Advance ₹": row.advance > 0 ? row.advance.toFixed(2) : "-",
-          "Collected ₹": (row.collected || 0) > 0 ? row.collected.toFixed(2) : "-",
-          "Balance ₹": balText,
-        });
-      });
-
-      // Sub total row
-      const subService   = rows.reduce((s, r) => s + r.service,          0);
-      const subSpare     = rows.reduce((s, r) => s + r.spare,            0);
-      const subAdvance   = rows.reduce((s, r) => s + r.advance,          0);
-      const subCollected = rows.reduce((s, r) => s + (r.collected || 0), 0);
-      const subBalance   = rows.reduce((s, r) => s + (r.balance ?? 0),   0);
-
       excelRows.push({
-        "Date": "", "Job No": "", "Type": "", "Label": "", "Name": "",
-        "Repair Date": "", "Txn Date": "", "Delivery Date": `Sub Total (${date})`,
-        "Service ₹": subService.toFixed(2),
-        "Spare ₹": subSpare.toFixed(2),
-        "Advance ₹": subAdvance.toFixed(2),
-        "Collected ₹": subCollected.toFixed(2),
-        "Balance ₹": subBalance === 0 ? "-" : subBalance.toFixed(2),
+  "Date": date,
+  "Job No": row.jobSheetNo,
+  "Type": row.type === "advance" ? "Advance" : "Service",
+  "Label": row.label,
+  "Name": row.name,
+  "Repair Date": row.repairDate || "-",
+  "Txn Date": row.date,
+  "Delivery Date": row.deliveryDate,
+  "Service ₹": row.type === "advance"
+    ? (row.serviceRef > 0 ? `(${row.serviceRef})` : "-")
+    : (row.service > 0 ? row.service.toFixed(2) : "-"),
+  "Spare ₹": row.spare > 0 ? row.spare.toFixed(2) : "-",
+  "Income ₹": row.type === "advance"
+    ? (row.incomeRef > 0 ? `(${row.incomeRef})` : "-")
+    : (row.income > 0 ? row.income.toFixed(2) : "-"),
+  "Others ₹": row.type === "advance"
+    ? (row.othersRef > 0 ? `(${row.othersRef})` : "-")
+    : (row.others > 0 ? row.others.toFixed(2) : "-"),
+  "Advance ₹": row.advance > 0 ? row.advance.toFixed(2) : "-",
+  "Collected ₹": (row.collected || 0) > 0 ? row.collected.toFixed(2) : "-",
+  "Balance ₹": balText,
+});
       });
 
-      // Blank separator
-      excelRows.push({
-        "Date": "", "Job No": "", "Type": "", "Label": "", "Name": "",
-        "Repair Date": "", "Txn Date": "", "Delivery Date": "",
-        "Service ₹": "", "Spare ₹": "", "Advance ₹": "",
-        "Collected ₹": "", "Balance ₹": "",
-      });
-    });
+  const subService   = rows.reduce((s, r) => s + r.service,          0);
+const subSpare     = rows.reduce((s, r) => s + r.spare,            0);
+const subIncome    = rows.reduce((s, r) => s + (r.income || 0),    0);
+const subOthers    = rows.reduce((s, r) => s + (r.others || 0),    0);
+const subAdvance   = rows.reduce((s, r) => s + r.advance,          0);
+const subCollected = rows.reduce((s, r) => s + (r.collected || 0), 0);
+const subBalance   = rows.reduce((s, r) => s + (r.balance ?? 0),   0);
+excelRows.push({
+  "Date": "", "Job No": "", "Type": "", "Label": "", "Name": "",
+  "Repair Date": "", "Txn Date": "", "Delivery Date": `Sub Total (${date})`,
+  "Service ₹": subService.toFixed(2),
+  "Spare ₹": subSpare.toFixed(2),
+  "Income ₹": subIncome.toFixed(2),
+  "Others ₹": subOthers.toFixed(2),
+  "Advance ₹": subAdvance.toFixed(2),
+  "Collected ₹": subCollected.toFixed(2),
+  "Balance ₹": subBalance === 0 ? "-" : subBalance.toFixed(2),
+});
 
-    // Grand total row
-    excelRows.push({
-      "Date": "", "Job No": "", "Type": "", "Label": "", "Name": "",
-      "Repair Date": "", "Txn Date": "", "Delivery Date": "GRAND TOTAL",
-      "Service ₹": grandService.toFixed(2),
-      "Spare ₹": grandSpare.toFixed(2),
-      "Advance ₹": grandAdvance.toFixed(2),
-      "Collected ₹": grandCollected.toFixed(2),
-      "Balance ₹": grandPending === 0 ? "-" : grandPending.toFixed(2),
-    });
+// Blank separator
+excelRows.push({
+  "Date": "", "Job No": "", "Type": "", "Label": "", "Name": "",
+  "Repair Date": "", "Txn Date": "", "Delivery Date": "",
+  "Service ₹": "", "Spare ₹": "", "Income ₹": "", "Others ₹": "", "Advance ₹": "",
+  "Collected ₹": "", "Balance ₹": "",
+});
+});
+
+// GRAND TOTAL — once, after all dates
+excelRows.push({
+  "Date": "", "Job No": "", "Type": "", "Label": "", "Name": "",
+  "Repair Date": "", "Txn Date": "", "Delivery Date": "GRAND TOTAL",
+  "Service ₹": grandService.toFixed(2),
+  "Spare ₹": grandSpare.toFixed(2),
+  "Income ₹": grandIncome.toFixed(2),
+  "Others ₹": grandOthers.toFixed(2),
+  "Advance ₹": grandAdvance.toFixed(2),
+  "Collected ₹": grandCollected.toFixed(2),
+  "Balance ₹": grandPending === 0 ? "-" : grandPending.toFixed(2),
+});
 
     const ws = XLSX.utils.json_to_sheet(excelRows);
     const wb = XLSX.utils.book_new();
@@ -307,22 +446,31 @@ const ValueReport = () => {
           📥 Excel Download
         </button>
 
-        {/* SUMMARY CHIPS */}
+      {/* SUMMARY CHIPS */}
         <div style={{ marginLeft: "auto", display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <span style={{ background: "#eff6ff", color: "#1d4ed8", borderRadius: 20, padding: "4px 12px", fontSize: 12, fontWeight: 700 }}>
-            📋 {allRows.filter(r => r.type === "service").length} Jobs
+          <span style={{ display: "flex", alignItems: "center", gap: 5, background: "#eff6ff", color: "#1d4ed8", borderRadius: 20, padding: "4px 12px", fontSize: 12, fontWeight: 700 }}>
+            <FileText size={13} /> {allRows.filter(r => r.type === "service").length} Jobs
           </span>
-          <span style={{ background: "#f0fdf4", color: "#15803d", borderRadius: 20, padding: "4px 12px", fontSize: 12, fontWeight: 700 }}>
-            💰 Collected ₹{grandCollected.toFixed(2)}
+          <span style={{ display: "flex", alignItems: "center", gap: 5, background: "#f0fdf4", color: "#15803d", borderRadius: 20, padding: "4px 12px", fontSize: 12, fontWeight: 700 }}>
+            <Wallet size={13} /> Collected ₹{grandCollected.toFixed(2)}
           </span>
-          <span style={{ background: "#fef9c3", color: "#854d0e", borderRadius: 20, padding: "4px 12px", fontSize: 12, fontWeight: 700 }}>
-            🔧 Service ₹{grandService.toFixed(2)}
+          <span style={{ display: "flex", alignItems: "center", gap: 5, background: "#fef9c3", color: "#854d0e", borderRadius: 20, padding: "4px 12px", fontSize: 12, fontWeight: 700 }}>
+            <Wrench size={13} /> Service ₹{grandService.toFixed(2)}
           </span>
-          <span style={{ background: "#fdf4ff", color: "#7e22ce", borderRadius: 20, padding: "4px 12px", fontSize: 12, fontWeight: 700 }}>
-            ⚙️ Spare ₹{grandSpare.toFixed(2)}
+          <span style={{ display: "flex", alignItems: "center", gap: 5, background: "#f3e8ff", color: "#7e22ce", borderRadius: 20, padding: "4px 12px", fontSize: 12, fontWeight: 700 }}>
+            <Cog size={13} /> Spare ₹{grandSpare.toFixed(2)}
           </span>
-          <span style={{ background: grandPending > 0 ? "#fff1f2" : "#f0fdf4", color: grandPending > 0 ? "#be123c" : "#15803d", borderRadius: 20, padding: "4px 12px", fontSize: 12, fontWeight: 700 }}>
-            ⚖️ Pending ₹{grandPending.toFixed(2)}
+          <span style={{ display: "flex", alignItems: "center", gap: 5, background: "#ecfeff", color: "#0e7490", borderRadius: 20, padding: "4px 12px", fontSize: 12, fontWeight: 700 }}>
+            <IndianRupee size={13} /> Income ₹{grandIncome.toFixed(2)}
+          </span>
+          <span style={{ display: "flex", alignItems: "center", gap: 5, background: "#fff7ed", color: "#c2410c", borderRadius: 20, padding: "4px 12px", fontSize: 12, fontWeight: 700 }}>
+            <Package size={13} /> Others ₹{grandOthers.toFixed(2)}
+          </span>
+          <span style={{ display: "flex", alignItems: "center", gap: 5, background: "#f0fdf4", color: "#166534", borderRadius: 20, padding: "4px 12px", fontSize: 12, fontWeight: 700 }}>
+            <HandCoins size={13} /> Advance ₹{grandAdvance.toFixed(2)}
+          </span>
+          <span style={{ display: "flex", alignItems: "center", gap: 5, background: grandPending > 0 ? "#fff1f2" : "#f0fdf4", color: grandPending > 0 ? "#be123c" : "#15803d", borderRadius: 20, padding: "4px 12px", fontSize: 12, fontWeight: 700 }}>
+            <Scale size={13} /> Pending ₹{grandPending.toFixed(2)}
           </span>
         </div>
       </div>
@@ -358,27 +506,31 @@ const ValueReport = () => {
                   <th style={th}>Repair Date</th>
                   <th style={th}>Txn Date</th>
                   <th style={th}>Delivery Date</th>
-                  <th style={{ ...th, textAlign: "right" }}>Service ₹</th>
-                  <th style={{ ...th, textAlign: "right" }}>Spare ₹</th>
-                  <th style={{ ...th, textAlign: "right" }}>Advance ₹</th>
+                <th style={{ ...th, textAlign: "right" }}>Service ₹</th>
+<th style={{ ...th, textAlign: "right" }}>Spare ₹</th>
+<th style={{ ...th, textAlign: "right" }}>Income ₹</th>
+<th style={{ ...th, textAlign: "right" }}>Others ₹</th>
+<th style={{ ...th, textAlign: "right" }}>Advance ₹</th>
                   <th style={{ ...th, textAlign: "right" }}>Collected ₹</th>
                   <th style={{ ...th, textAlign: "right", background: "#be123c" }}>Balance ₹</th>
                 </tr>
               </thead>
               <tbody>
                 {Object.keys(groupedData).map((date, gIdx) => {
-                  const rows         = groupedData[date];
-                  const subService   = rows.reduce((s, r) => s + r.service,          0);
-                  const subSpare     = rows.reduce((s, r) => s + r.spare,            0);
-                  const subAdvance   = rows.reduce((s, r) => s + r.advance,          0);
-                  const subCollected = rows.reduce((s, r) => s + (r.collected || 0), 0);
-                  const subBalance   = rows.reduce((s, r) => s + (r.balance ?? 0),   0);
+              const rows         = groupedData[date];
+const subService   = rows.reduce((s, r) => s + r.service,          0);
+const subSpare     = rows.reduce((s, r) => s + r.spare,            0);
+const subIncome    = rows.reduce((s, r) => s + (r.income || 0),    0);
+const subOthers    = rows.reduce((s, r) => s + (r.others || 0),    0);
+const subAdvance   = rows.reduce((s, r) => s + r.advance,          0);
+const subCollected = rows.reduce((s, r) => s + (r.collected || 0), 0);
+const subBalance   = rows.reduce((s, r) => s + (r.balance ?? 0),   0);
 
                   return (
                     <React.Fragment key={gIdx}>
                       <tr>
-                        <td colSpan={12} style={{
-                          padding: "7px 14px", background: "#dbeafe", color: "#1e40af",
+                       <td colSpan={14} style={{
+  padding: "7px 14px", background: "#dbeafe", color: "#1e40af",
                           fontWeight: 700, fontSize: 12,
                           borderTop: "2px solid #93c5fd", borderBottom: "1px solid #bfdbfe",
                         }}>
@@ -389,11 +541,16 @@ const ValueReport = () => {
                       {rows.map((row, rIdx) => {
                         const bal = renderBalance(row.balance);
                         return (
-                          <tr key={rIdx} style={{
-                            background: row.type === "advance"
+                         <tr key={rIdx}
+                            id={`entry-${row.jobSheetNo}-${row.date}-${row.type}`}
+                            style={{
+                            background: highlightKey === `entry-${row.jobSheetNo}-${row.date}-${row.type}`
+                              ? "#fef08a"
+                              : row.type === "advance"
                               ? rIdx % 2 === 0 ? "#f0fdf4" : "#dcfce7"
                               : rIdx % 2 === 0 ? "#fff" : "#f8fafc",
                             borderBottom: "1px solid #f1f5f9",
+                            transition: "background 0.3s",
                           }}>
                             <td style={td}>{row.jobSheetNo}</td>
                             <td style={td}>
@@ -408,21 +565,81 @@ const ValueReport = () => {
                               )}
                             </td>
                             <td style={{ ...td, color: "#64748b", fontSize: 12 }}>{row.label}</td>
-                            <td style={td}>{row.name}</td>
+      <td style={td}>{row.name}</td>
                             <td style={td}>{row.repairDate || "-"}</td>
                             <td style={{ ...td, fontWeight: 600, color: "#0f172a" }}>{row.date}</td>
                             <td style={td}>{row.deliveryDate}</td>
-                            <td style={{ ...td, textAlign: "right", color: row.type === "advance" ? "#94a3b8" : "#0f172a" }}>
-                              {row.type === "advance"
-                                ? (row.serviceRef > 0 ? `(₹${row.serviceRef})` : "-")
-                                : (row.service > 0 ? `₹ ${row.service.toFixed(2)}` : "-")}
-                            </td>
                             <td style={{ ...td, textAlign: "right" }}>
-                              {row.spare > 0 ? `₹ ${row.spare.toFixed(2)}` : "-"}
+                              {row.service > 0 ? `₹ ${row.service.toFixed(2)}` : "-"}
+                            {row.priorService > 0 && (
+                                <div
+                                  style={{ fontSize: 11, color: "#94a3b8", fontWeight: 500, cursor: "pointer", textDecoration: "underline" }}
+                                  onClick={() => jumpToEntry(row.jobSheetNo, row.priorServiceDate, "service")}
+                                >
+                                  Already ₹{row.priorService}
+                                </div>
+                              )}
                             </td>
-                            <td style={{ ...td, textAlign: "right", color: "#15803d", fontWeight: 600 }}>
-                              {row.advance > 0 ? `₹ ${row.advance.toFixed(2)}` : "-"}
-                            </td>
+                          <td style={{ ...td, textAlign: "right" }}>
+  {row.spare > 0 ? `₹ ${row.spare.toFixed(2)}` : "-"}
+ {row.priorSpare > 0 && (
+  <div
+    style={{ fontSize: 11, color: "#94a3b8", fontWeight: 500, cursor: "pointer", textDecoration: "underline" }}
+    onClick={() => jumpToEntry(row.jobSheetNo, row.priorSpareDate, "service")}
+  >
+    Already ₹{row.priorSpare}
+  </div>
+)}
+</td>
+<td style={{ ...td, textAlign: "right" }}>
+  {row.income > 0 ? `₹ ${row.income.toFixed(2)}` : "-"}
+{row.priorIncome > 0 && (
+  <div
+    style={{ fontSize: 11, color: "#94a3b8", fontWeight: 500, cursor: "pointer", textDecoration: "underline" }}
+    onClick={() => jumpToEntry(row.jobSheetNo, row.priorIncomeDate, "service")}
+  >
+    Already ₹{row.priorIncome}
+  </div>
+)}
+</td>
+<td style={{ ...td, textAlign: "right" }}>
+  {row.others > 0 ? `₹ ${row.others.toFixed(2)}` : "-"}
+{row.priorOthers > 0 && (
+  <div
+    style={{ fontSize: 11, color: "#94a3b8", fontWeight: 500, cursor: "pointer", textDecoration: "underline" }}
+    onClick={() => jumpToEntry(row.jobSheetNo, row.priorOthersDate, "service")}
+  >
+    Already ₹{row.priorOthers}
+  </div>
+)}
+</td>
+<td style={{ ...td, textAlign: "right", color: "#15803d", fontWeight: 600 }}>
+  {row.advance > 0 ? `₹ ${row.advance.toFixed(2)}` : "-"}
+{row.priorAdvance > 0 && (
+  <div
+    style={{ fontSize: 11, color: "#94a3b8", fontWeight: 500, cursor: "pointer", textDecoration: "underline" }}
+    onClick={() => jumpToEntry(row.jobSheetNo, row.priorAdvanceDate, "advance")}
+  >
+    Already ₹{row.priorAdvance}
+  </div>
+)}
+</td>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
                             <td style={{ ...td, textAlign: "right", fontWeight: 700, color: "#15803d" }}>
                               {(row.collected || 0) > 0 ? `₹ ${row.collected.toFixed(2)}` : "-"}
                             </td>
@@ -434,47 +651,55 @@ const ValueReport = () => {
                       })}
 
                       {/* SUB TOTAL */}
-                      <tr style={{ background: "#f1f5f9", fontWeight: 700 }}>
-                        <td colSpan={7} style={{ ...td, textAlign: "right", color: "#475569" }}>
-                          Sub Total ({date})
-                        </td>
-                        <td style={{ ...td, textAlign: "right" }}>₹ {subService.toFixed(2)}</td>
-                        <td style={{ ...td, textAlign: "right" }}>₹ {subSpare.toFixed(2)}</td>
-                        <td style={{ ...td, textAlign: "right", color: "#15803d" }}>₹ {subAdvance.toFixed(2)}</td>
-                        <td style={{ ...td, textAlign: "right", color: "#15803d" }}>₹ {subCollected.toFixed(2)}</td>
-                        <td style={{
-                          ...td, textAlign: "right",
-                          color: subBalance > 0 ? "#be123c" : "#64748b",
-                          background: subBalance > 0 ? "#fff1f2" : "transparent",
-                        }}>
-                          {subBalance === 0 ? "-" : `₹ ${subBalance.toFixed(2)}`}
-                        </td>
-                      </tr>
+                    <tr style={{ background: "#f1f5f9", fontWeight: 700 }}>
+  <td colSpan={7} style={{ ...td, textAlign: "right", color: "#475569" }}>
+    Sub Total ({date})
+  </td>
+  <td style={{ ...td, textAlign: "right" }}>₹ {subService.toFixed(2)}</td>
+  <td style={{ ...td, textAlign: "right" }}>₹ {subSpare.toFixed(2)}</td>
+  <td style={{ ...td, textAlign: "right" }}>₹ {subIncome.toFixed(2)}</td>
+  <td style={{ ...td, textAlign: "right" }}>₹ {subOthers.toFixed(2)}</td>
+  <td style={{ ...td, textAlign: "right", color: "#15803d" }}>₹ {subAdvance.toFixed(2)}</td>
+  <td style={{ ...td, textAlign: "right", color: "#15803d" }}>₹ {subCollected.toFixed(2)}</td>
+  <td style={{
+    ...td, textAlign: "right",
+    color: subBalance > 0 ? "#be123c" : "#64748b",
+    background: subBalance > 0 ? "#fff1f2" : "transparent",
+  }}>
+    {subBalance === 0 ? "-" : `₹ ${subBalance.toFixed(2)}`}
+  </td>
+</tr>
                     </React.Fragment>
                   );
                 })}
 
                 {/* GRAND TOTAL */}
-                <tr style={{ background: "#1e293b", color: "#fff", fontWeight: 800, fontSize: 14 }}>
-                  <td colSpan={7} style={{ ...td, textAlign: "right", color: "#fff", borderTop: "2px solid #334155" }}>
-                    GRAND TOTAL
-                  </td>
-                  <td style={{ ...td, textAlign: "right", color: "#fde68a", borderTop: "2px solid #334155" }}>
-                    ₹ {grandService.toFixed(2)}
-                  </td>
-                  <td style={{ ...td, textAlign: "right", color: "#c4b5fd", borderTop: "2px solid #334155" }}>
-                    ₹ {grandSpare.toFixed(2)}
-                  </td>
-                  <td style={{ ...td, textAlign: "right", color: "#86efac", borderTop: "2px solid #334155" }}>
-                    ₹ {grandAdvance.toFixed(2)}
-                  </td>
-                  <td style={{ ...td, textAlign: "right", color: "#86efac", borderTop: "2px solid #334155" }}>
-                    ₹ {grandCollected.toFixed(2)}
-                  </td>
-                  <td style={{ ...td, textAlign: "right", borderTop: "2px solid #334155", background: grandPending > 0 ? "#be123c" : "#166534", color: "#fff" }}>
-                    {grandPending === 0 ? "-" : `₹ ${grandPending.toFixed(2)}`}
-                  </td>
-                </tr>
+             <tr style={{ background: "#1e293b", color: "#fff", fontWeight: 800, fontSize: 14 }}>
+  <td colSpan={7} style={{ ...td, textAlign: "right", color: "#fff", borderTop: "2px solid #334155" }}>
+    GRAND TOTAL
+  </td>
+  <td style={{ ...td, textAlign: "right", color: "#fde68a", borderTop: "2px solid #334155" }}>
+    ₹ {grandService.toFixed(2)}
+  </td>
+  <td style={{ ...td, textAlign: "right", color: "#c4b5fd", borderTop: "2px solid #334155" }}>
+    ₹ {grandSpare.toFixed(2)}
+  </td>
+  <td style={{ ...td, textAlign: "right", color: "#fbcfe8", borderTop: "2px solid #334155" }}>
+    ₹ {grandIncome.toFixed(2)}
+  </td>
+  <td style={{ ...td, textAlign: "right", color: "#fed7aa", borderTop: "2px solid #334155" }}>
+    ₹ {grandOthers.toFixed(2)}
+  </td>
+  <td style={{ ...td, textAlign: "right", color: "#86efac", borderTop: "2px solid #334155" }}>
+    ₹ {grandAdvance.toFixed(2)}
+  </td>
+  <td style={{ ...td, textAlign: "right", color: "#86efac", borderTop: "2px solid #334155" }}>
+    ₹ {grandCollected.toFixed(2)}
+  </td>
+  <td style={{ ...td, textAlign: "right", borderTop: "2px solid #334155", background: grandPending > 0 ? "#be123c" : "#166534", color: "#fff" }}>
+    {grandPending === 0 ? "-" : `₹ ${grandPending.toFixed(2)}`}
+  </td>
+</tr>
               </tbody>
             </table>
           </div>

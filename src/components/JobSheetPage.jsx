@@ -1,9 +1,12 @@
+
+
 import React, { useState, useEffect } from "react";
 import AdvancePopup from "./AdvancePopup";
 import axios from "axios";
 import makeModelData from "../data/makeModelData";
 import JobSheetSearchModal from "./JobSheetSearchModal";
 import SparePopup from "./SparePopup";
+import OthersPopup from "./OthersPopup";
 import Select from "react-select";
 import RepairStepsTimeline from "./RepairStepsTimeline";
 import CustomerAutocomplete from "./CustomerAutocomplete";
@@ -61,16 +64,22 @@ const validateField = (name, value) => {
     setFormErrors(prev => ({ ...prev, [name]: validateField(name, value) }));
   };
 
-  const validateAll = () => {
-    const errors = {
-      customerName: validateField("customerName", customerName),
-      contact: validateField("contact", contact),
-      email: validateField("email", email),
-    };
-    setFormErrors(errors);
-    setTouched({ customerName: true, contact: true, email: true });
-   return !Object.values(errors).some(Boolean);
+const validateAll = () => {
+  const errors = {
+    customerName: validateField("customerName", customerName),
+    contact: validateField("contact", contact),
+    email: validateField("email", email),
   };
+  setFormErrors(errors);
+  setTouched({ customerName: true, contact: true, email: true });
+
+  const errorMessages = Object.values(errors).filter(Boolean);
+  if (errorMessages.length > 0) {
+    alert("⚠️ Please fix before Update/Save:\n\n" + errorMessages.join("\n"));
+    return false;
+  }
+  return true;
+};
 
   /* ================= TIME ================= */
   const [now, setNow] = useState(new Date());
@@ -109,7 +118,9 @@ const validateField = (name, value) => {
 
   const [results, setResults] = useState([]);
   const [showSearchModal, setShowSearchModal] = useState(false);
-
+const [othersAmount, setOthersAmount] = useState("");
+const [othersItems, setOthersItems] = useState([]);
+const [showOthersPopup, setShowOthersPopup] = useState(false);
 
   /* ================= CUSTOMER ================= */
   const [customerName, setCustomerName] = useState("");
@@ -225,7 +236,7 @@ useEffect(() => {
   const [sparePopup, setSparePopup] = useState(false);
 
   const [paymentMode, setPaymentMode] = useState("");
-  const [estimate, setEstimate] = useState("");
+ const [income, setIncome] = useState("");
   const [repairDate, setRepairDate] = useState(today);
   const [deliveryDate, setDeliveryDate] = useState("");
   const [remarks, setRemarks] = useState("");
@@ -234,16 +245,6 @@ const [advanceItems, setAdvanceItems] = useState([]);
 const [showAdvancePopup, setShowAdvancePopup] = useState(false);
 const [margin, setMargin] = useState("");
 
-
-
-useEffect(() => {
-  const service = Number(serviceCharge || 0);
-  const spare = Number(spareCharge || 0);
-  const est = service + spare;
-
-  setEstimate(est > 0 ? String(est) : "");
-  setMargin(est > 0 ? String(est - spare) : "");
-}, [serviceCharge, spareCharge]);
 
 
 
@@ -326,7 +327,11 @@ const handleUpdate = async () => {
       dealer, drawer, serviceRep,
       serviceCharge: Number(serviceCharge || 0),
       spareCharge:   Number(spareCharge   || 0),
-      estimate, paymentMode, repairDate, deliveryDate,
+    income: Number(income || 0), 
+    
+    othersAmount: Number(othersAmount || 0),
+othersItems,
+    paymentMode, repairDate, deliveryDate,
       instaFollowers, googleReview,
       advanceAmount: Number(advanceAmount || 0),
       advanceDate,   // ✅ இது already இருக்கு
@@ -400,7 +405,11 @@ const handleSave = async () => {
         googleReview,advanceDate,
         serviceCharge: Number(serviceCharge || 0), 
         spareCharge: Number(spareCharge || 0), 
-        estimate, paymentMode, repairDate, deliveryDate, remarks, 
+  income: Number(income || 0), 
+  
+  othersAmount: Number(othersAmount || 0),
+othersItems,
+  paymentMode, repairDate, deliveryDate, remarks,
         advanceAmount: Number(advanceAmount || 0), 
         margin: Number(margin || 0) 
       }));
@@ -462,8 +471,10 @@ setAdvanceItems([]);
     setDrawer("");
     setServiceCharge("");
     setSpareCharge("");
+    setOthersAmount("");
+setOthersItems([]);
       setSpareItems([]); 
-    setEstimate("");
+setIncome("");
     setPaymentMode("");
     setRemarks("");
 setAdvanceAmount("");
@@ -525,7 +536,9 @@ if (!engineerList.length) return;  // ← ADD THIS
   setServiceCharge(editData.service?.serviceCharge || "");
   setSpareCharge(editData.service?.spareCharge || "");
   setSpareItems(editData.spareItems || []);
-  setEstimate(editData.service?.estimate || "");
+  setOthersAmount(editData.service?.othersAmount || "");
+setOthersItems(editData.service?.othersItems || []);
+  setIncome(editData.service?.income || "");
   setPaymentMode(editData.service?.paymentMode || "");
   setRepairDate(editData.service?.repairDate?.slice(0, 10) || today);
   setDeliveryDate(editData.service?.deliveryDate?.slice(0, 10) || "");
@@ -1246,6 +1259,45 @@ onSelect={(customer) => {
               {/* ROW 2 – Charges & Payment */}
               <div className="row g-2 mt-1">
                 <div className="col-md-3">
+  <input
+    className="form-control form-control-sm"
+    placeholder="Income ₹"
+    value={income}
+    onChange={(e) => setIncome(onlyNumbers(e.target.value))}
+  />
+</div>
+
+<div className="col-md-3">
+  <input
+    type="text"
+    className="form-control form-control-sm"
+    placeholder="Spare Charges"
+    value={spareCharge}
+    readOnly
+    onClick={() => setSparePopup(true)}
+    style={{ cursor: "pointer", background: "#f8f9fa" }}
+  />
+</div>
+
+
+
+   <div className="col-md-3">
+  <input
+    type="text"
+    className="form-control form-control-sm"
+    placeholder="Others ₹"
+    value={othersAmount}
+    readOnly
+    onClick={() => setShowOthersPopup(true)}
+    style={{ cursor: "pointer", background: "#f8f9fa" }}
+  />
+  {othersItems.length > 0 && (
+    <div style={{ fontSize: 10, color: "#6c757d", marginTop: 2, fontWeight: 500 }}>
+      📦 {othersItems.length} expense{othersItems.length > 1 ? "s" : ""}
+    </div>
+  )}
+</div> 
+                <div className="col-md-3">
                   <input
                     type="text"
                     className="form-control form-control-sm"
@@ -1257,41 +1309,7 @@ onSelect={(customer) => {
 
                 </div>
 
-
-                <div className="col-md-3">
-                  <input
-                    type="text"
-                    className="form-control form-control-sm"
-                    placeholder="Spare Charges"
-                    value={spareCharge}
-                    readOnly
-                    onClick={() => setSparePopup(true)}
-                    style={{ cursor: "pointer", background: "#f8f9fa" }}
-                  />
-                </div>
-
-<div className="col-md-3">
-  <input
-    className="form-control form-control-sm"
-    placeholder="Estimate Amount / Time"
-    value={estimate}
-    readOnly
-    style={{ background: "#f8f9fa", cursor: "not-allowed" }}
-    onChange={(e) => setEstimate(onlyNumbers(e.target.value))}
-  />
-</div>
-                <div className="col-md-3">
-                  <select
-                    className="form-select form-select-sm"
-                    value={paymentMode}
-                    onChange={(e) => setPaymentMode(e.target.value)}
-                  >
-                    <option>Payment Mode</option>
-                    <option>Cash</option>
-                    <option>UPI</option>
-                    <option>Card</option>
-                  </select>
-                </div>
+          
               </div>
 {/* ROW 3 – Adv.Amount (popup) | Margin | S.Rep */}
 <div className="row g-2 mt-2 align-items-start">
@@ -1313,18 +1331,19 @@ onSelect={(customer) => {
       </div>
     )}
   </div>
+   <div className="col-md-3">
+                  <select
+                    className="form-select form-select-sm"
+                    value={paymentMode}
+                    onChange={(e) => setPaymentMode(e.target.value)}
+                  >
+                    <option>Payment Mode</option>
+                    <option>Cash</option>
+                    <option>UPI</option>
+                    <option>Card</option>
+                  </select>
+                </div>
 
-  {/* Margin */}
-  <div className="col-md-4">
-    <input
-      type="text"
-      className="form-control form-control-sm"
-      placeholder="Margin ₹"
-      value={margin}
-      readOnly
-      style={{ background: "#f8f9fa", cursor: "not-allowed" }}
-    />
-  </div>
 
   {/* Service Rep */}
   <div className="col-md-4">
@@ -1743,14 +1762,25 @@ onSelect={(customer) => {
     </div>
   </div>
 )}
-   {sparePopup && (
+  {sparePopup && (
         <SparePopup
           onClose={() => setSparePopup(false)}
           setSpareCharge={setSpareCharge}
           setSpareItems={setSpareItems}
              existingItems={spareItems} 
+          referenceData={{ income, service: serviceCharge, others: othersAmount, advance: advanceAmount }}
         />
       )}
+
+      {showOthersPopup && (
+  <OthersPopup
+    onClose={() => setShowOthersPopup(false)}
+    setOthersAmount={setOthersAmount}
+    setOthersItems={setOthersItems}
+    existingItems={othersItems}
+    referenceData={{ income, service: serviceCharge, spare: spareCharge, advance: advanceAmount }}
+  />
+)}
 {/* ✅ இதை add பண்ணு */}
 {showAdvancePopup && (
   <AdvancePopup
@@ -1758,9 +1788,9 @@ onSelect={(customer) => {
     setAdvanceAmount={setAdvanceAmount}
     setAdvanceItems={setAdvanceItems}
     existingItems={advanceItems}
+    referenceData={{ income, service: serviceCharge, spare: spareCharge, others: othersAmount }}
   />
 )}
-
 
 
 
@@ -1777,4 +1807,8 @@ onSelect={(customer) => {
   );
 };
 
-export default JobSheetPage;
+export default JobSheetPage;   
+
+
+
+

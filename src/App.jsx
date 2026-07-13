@@ -27,6 +27,10 @@ import InvoiceBill from "./components/InvoiceBill";
 import UserReportPage from "./components/reports/UserReportPage";
 import UserListPopup from "./components/popups/UserListPopup";
 import SpareReportPage from "./components/reports/SpareReportPage";
+import ServiceReportPage from "./components/reports/ServiceReportPage";
+import OthersReportPage from "./components/reports/OthersReportPage";
+import AdvanceReportPage from "./components/reports/AdvanceReportPage";
+import IncomeReportPage from "./components/reports/IncomeReportPage";
 import EngineerDashboard from "./components/Engineerdashboard"
 import RebillReportPage from "./components/reports/RebillReportPage";
 import './App.css';
@@ -72,7 +76,10 @@ function App() {
 
 
 <Route path="/salesrep-report" element={<ServiceRepReportPage />} />
-
+<Route path="/service-report" element={<ServiceReportPage />} />
+<Route path="/income-report" element={<IncomeReportPage />} />
+<Route path="/others-report" element={<OthersReportPage />} />
+<Route path="/advance-report" element={<AdvanceReportPage />} />
 
 <Route path="/my-report" element={<ServiceRepReportPage />} />
      

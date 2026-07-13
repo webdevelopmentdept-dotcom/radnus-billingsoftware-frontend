@@ -1,33 +1,30 @@
 import React, { useState } from "react";
 
-const AdvancePopup = ({ onClose, setAdvanceAmount, setAdvanceItems, existingItems = [] }) => {
+const CATEGORIES = ["Courier", "Petrol", "Return", "Food", "Transport", "Other"];
+
+const OthersPopup = ({ onClose, setOthersAmount, setOthersItems, existingItems = [] }) => {
   const today = new Date().toISOString().split("T")[0];
 
-  // ✅ KEY FIX: useEffect இல்லாம, mount-ல் மட்டும் copy எடு
-  const [advances, setAdvances] = useState(() => [...existingItems]);
-  const [name, setName] = useState("");
+  const [items, setItems] = useState(() => [...existingItems]);
+  const [category, setCategory] = useState(CATEGORIES[0]);
   const [amount, setAmount] = useState("");
   const [date, setDate] = useState(today);
 
-  const total = advances.reduce((sum, a) => sum + Number(a.amount || 0), 0);
+  const total = items.reduce((sum, i) => sum + Number(i.amount || 0), 0);
 
   const handleAdd = () => {
     if (!amount || Number(amount) <= 0) return alert("Enter valid amount");
     if (!date) return alert("Select a date");
-    setAdvances(prev => [
-      ...prev,
-      { label: name || `Advance ${prev.length + 1}`, amount: Number(amount), date }
-    ]);
+    setItems(prev => [...prev, { category, amount: Number(amount), date }]);
     setAmount("");
-    setName("");
     setDate(today);
   };
 
-  const handleRemove = (i) => setAdvances(prev => prev.filter((_, idx) => idx !== i));
+  const handleRemove = (i) => setItems(prev => prev.filter((_, idx) => idx !== i));
 
   const handleSave = () => {
-    setAdvanceItems(advances);
-    setAdvanceAmount(String(total));
+    setOthersItems(items);
+    setOthersAmount(String(total));
     onClose();
   };
 
@@ -36,21 +33,17 @@ const AdvancePopup = ({ onClose, setAdvanceAmount, setAdvanceItems, existingItem
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="modal-dialog modal-dialog-centered">
         <div className="modal-content">
-          <div className="modal-header bg-primary text-white py-2">
-            <h6 className="modal-title mb-0">💰 Add Advance Payments</h6>
+          <div className="modal-header bg-dark text-white py-2">
+            <h6 className="modal-title mb-0">📦 Add Other Expenses</h6>
             <button className="btn-close btn-close-white" onClick={onClose} />
           </div>
           <div className="modal-body">
             <div className="d-flex gap-2 mb-3 align-items-end flex-wrap">
               <div style={{ flex: 2 }}>
-                <label className="form-label small mb-1">Label (optional)</label>
-                <input
-                  className="form-control form-control-sm"
-                  placeholder="e.g. First Advance"
-                  value={name}
-                  onChange={e => setName(e.target.value)}
-                  onKeyDown={e => { if (e.key === "Enter") handleAdd(); }}
-                />
+                <label className="form-label small mb-1">Category</label>
+                <select className="form-select form-select-sm" value={category} onChange={e => setCategory(e.target.value)}>
+                  {CATEGORIES.map((c, i) => <option key={i} value={c}>{c}</option>)}
+                </select>
               </div>
               <div style={{ flex: 1 }}>
                 <label className="form-label small mb-1">Amount ₹ *</label>
@@ -71,21 +64,21 @@ const AdvancePopup = ({ onClose, setAdvanceAmount, setAdvanceItems, existingItem
                   onChange={e => setDate(e.target.value)}
                 />
               </div>
-              <button className="btn btn-primary btn-sm" onClick={handleAdd}>Add</button>
+              <button className="btn btn-dark btn-sm" onClick={handleAdd}>Add</button>
             </div>
 
             <table className="table table-sm table-bordered mb-2">
               <thead className="table-light">
-                <tr><th>Label</th><th>Amount ₹</th><th>Date</th><th></th></tr>
+                <tr><th>Category</th><th>Amount ₹</th><th>Date</th><th></th></tr>
               </thead>
               <tbody>
-                {advances.length === 0 ? (
-                  <tr><td colSpan={4} className="text-center text-muted small py-3">No advances added yet</td></tr>
-                ) : advances.map((a, i) => (
+                {items.length === 0 ? (
+                  <tr><td colSpan={4} className="text-center text-muted small py-3">No expenses added yet</td></tr>
+                ) : items.map((it, i) => (
                   <tr key={i}>
-                    <td>{a.label || "-"}</td>
-                    <td>₹ {a.amount}</td>
-                    <td>{a.date ? String(a.date).slice(0, 10) : "-"}</td>
+                    <td>{it.category}</td>
+                    <td>₹ {it.amount}</td>
+                    <td>{it.date ? String(it.date).slice(0, 10) : "-"}</td>
                     <td>
                       <button className="btn btn-outline-danger btn-sm py-0 px-1" onClick={() => handleRemove(i)}>✕</button>
                     </td>
@@ -94,7 +87,7 @@ const AdvancePopup = ({ onClose, setAdvanceAmount, setAdvanceItems, existingItem
               </tbody>
             </table>
 
-            <div className="text-end fw-bold text-success">Total Advance: ₹ {total}</div>
+            <div className="text-end fw-bold text-dark">Total Others: ₹ {total}</div>
           </div>
 
           <div className="modal-footer py-2">
@@ -107,4 +100,4 @@ const AdvancePopup = ({ onClose, setAdvanceAmount, setAdvanceItems, existingItem
   );
 };
 
-export default AdvancePopup;
+export default OthersPopup;

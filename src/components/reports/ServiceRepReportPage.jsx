@@ -1,6 +1,11 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
 import * as XLSX from "xlsx";
+import {
+  FaUserTie, FaUser, FaWrench, FaCogs, FaRupeeSign, FaBoxOpen,
+  FaHandHoldingUsd, FaCoins, FaInstagram, FaStar, FaTable,
+  FaChartBar, FaSearch, FaTimes, FaFileExcel, FaCalendarAlt,
+} from "react-icons/fa";
 
 const API = import.meta.env.VITE_API_URL;
 
@@ -24,7 +29,6 @@ const StatusBadge = ({ status }) => {
   );
 };
 
-// ✅ Insta / Google — plain text
 const SocialText = ({ val }) => {
   if (!val || val === "-" || val === "") return <span style={{ color: "#94a3b8", fontSize: 11 }}>—</span>;
   if (val === "Already Done") return <span style={{ fontSize: 11, color: "#1e293b" }}>Done</span>;
@@ -50,28 +54,31 @@ const Avatar = ({ name, idx }) => {
   );
 };
 
-const SummaryCard = ({ label, value, accent }) => (
+const SummaryCard = ({ label, value, accent, icon }) => (
   <div style={{ background: "#fff", borderRadius: 10, padding: "14px 16px", border: "1px solid #e9ecef", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
-    <div style={{ fontSize: 11, color: "#6c757d", marginBottom: 4 }}>{label}</div>
+    <div style={{ fontSize: 11, color: "#6c757d", marginBottom: 4, display: "flex", alignItems: "center", gap: 5 }}>
+      {icon} {label}
+    </div>
     <div style={{ fontSize: 20, fontWeight: 600, color: accent || "#212529" }}>{value}</div>
   </div>
 );
 
-// ✅ Updated headers — added Insta + Google
 const JOB_HEADERS = [
   "#", "Job Sheet", "Service Rep", "Created By", "Customer",
   "Contact", "Device", "Status",
-  "Service ₹", "Spare ₹", "Margin ₹", "Advance ₹","Adv. Date", "Total ₹",
-  "📸 Insta", "⭐ Google", // ✅ NEW
+  "Service ₹", "Spare ₹", "Income ₹", "Others ₹", "Margin ₹", "Advance ₹", "Adv. Date", "Total ₹",
+  "Insta", "Google",
   "Date"
 ];
 
-// ✅ Updated JobRow — added Insta + Google cells
 const JobRow = ({ job, i, rep }) => {
   const sc  = Number(job.service?.serviceCharge || 0);
   const sp  = Number(job.service?.spareCharge   || 0);
+  const inc = Number(job.service?.income        || 0);
+  const oth = Number(job.service?.othersAmount  || 0);
   const mg  = Number(job.service?.margin        || 0);
   const adv = Number(job.service?.advanceAmount || 0);
+  const tot = sc + sp + inc + oth;
   return (
     <tr style={{ borderBottom: "1px solid #f0f0f0" }}
       onMouseEnter={e => e.currentTarget.style.background = "#f8f9fa"}
@@ -79,13 +86,13 @@ const JobRow = ({ job, i, rep }) => {
       <td style={{ padding: "8px 10px", color: "#6c757d" }}>{i + 1}</td>
       <td style={{ padding: "8px 10px", color: "#0d6efd", fontWeight: 500 }}>{job.jobSheetNo}</td>
       <td style={{ padding: "8px 10px" }}>
-        <span style={{ background: "#f0fdf4", color: "#166534", borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 500 }}>
-          🧑‍💼 {job.service?.serviceRep || rep || "—"}
+        <span style={{ background: "#f0fdf4", color: "#166534", borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 500, display: "inline-flex", alignItems: "center", gap: 4 }}>
+          <FaUserTie size={10} /> {job.service?.serviceRep || rep || "—"}
         </span>
       </td>
       <td style={{ padding: "8px 10px" }}>
-        <span style={{ background: "#eff6ff", color: "#1d4ed8", borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 500 }}>
-          👤 {job.createdBy?.username || "—"}
+        <span style={{ background: "#eff6ff", color: "#1d4ed8", borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 500, display: "inline-flex", alignItems: "center", gap: 4 }}>
+          <FaUser size={10} /> {job.createdBy?.username || "—"}
         </span>
       </td>
       <td style={{ padding: "8px 10px" }}>{job.customer?.name || "—"}</td>
@@ -98,18 +105,16 @@ const JobRow = ({ job, i, rep }) => {
       </td>
       <td style={{ padding: "8px 10px", color: "#7c3aed", fontWeight: 500 }}>{sc ? fmt(sc) : "—"}</td>
       <td style={{ padding: "8px 10px", color: "#db2777", fontWeight: 500 }}>{sp ? fmt(sp) : "—"}</td>
+      <td style={{ padding: "8px 10px", color: "#0e7490", fontWeight: 500 }}>{inc ? fmt(inc) : "—"}</td>
+      <td style={{ padding: "8px 10px", color: "#c2410c", fontWeight: 500 }}>{oth ? fmt(oth) : "—"}</td>
       <td style={{ padding: "8px 10px", color: "#f59e0b", fontWeight: 500 }}>{mg ? fmt(mg) : "—"}</td>
       <td style={{ padding: "8px 10px", color: "#0d6efd", fontWeight: 500 }}>{adv ? fmt(adv) : "—"}</td>
-
       <td style={{ padding: "8px 10px", color: "#0369a1", fontSize: 11, whiteSpace: "nowrap" }}>
-  {job.service?.advanceDate
-    ? new Date(job.service.advanceDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" })
-    : "—"}
-</td>
-
-<td style={{ padding: "8px 10px", color: "#059669", fontWeight: 600 }}>{sc + sp ? fmt(sc + sp) : "—"}</td>  
-      <td style={{ padding: "8px 10px", color: "#059669", fontWeight: 600 }}>{sc + sp ? fmt(sc + sp) : "—"}</td>
-      {/* ✅ NEW */}
+        {job.service?.advanceDate
+          ? new Date(job.service.advanceDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" })
+          : "—"}
+      </td>
+      <td style={{ padding: "8px 10px", color: "#059669", fontWeight: 600 }}>{tot ? fmt(tot) : "—"}</td>
       <td style={{ padding: "8px 10px", textAlign: "center" }}><SocialText val={job.service?.instaFollowers} /></td>
       <td style={{ padding: "8px 10px", textAlign: "center" }}><SocialText val={job.service?.googleReview} /></td>
       <td style={{ padding: "8px 10px", color: "#6c757d", whiteSpace: "nowrap" }}>
@@ -119,11 +124,8 @@ const JobRow = ({ job, i, rep }) => {
   );
 };
 
-/* ═══════════════════════════════════════════════════
-   MAIN
-═══════════════════════════════════════════════════ */
 const ServiceRepReportPage = () => {
-   const currentUser = JSON.parse(sessionStorage.getItem("user"));
+  const currentUser = JSON.parse(sessionStorage.getItem("user"));
   const currentRole = currentUser?.role;
   const currentName = currentUser?.name || currentUser?.username || "";
   const [data,       setData]       = useState({});
@@ -134,17 +136,13 @@ const ServiceRepReportPage = () => {
   const [repFilter,  setRepFilter]  = useState("");
   const [view,       setView]       = useState("table");
 
-
-
-useEffect(() => {
-  if (currentRole !== "admin") {
-    fetchData(currentName, "", "");
-  } else {
-    fetchData();
-  }
-}, []);
-
-  
+  useEffect(() => {
+    if (currentRole !== "admin") {
+      fetchData(currentName, "", "");
+    } else {
+      fetchData();
+    }
+  }, []);
 
   const fetchData = async (search = "", from = "", to = "") => {
     try {
@@ -171,10 +169,11 @@ useEffect(() => {
   const todayJobs    = allJobs.filter(j => new Date(j.createdAt).toLocaleDateString() === today).length;
   const totalService = allJobs.reduce((s, j) => s + Number(j.service?.serviceCharge || 0), 0);
   const totalSpare   = allJobs.reduce((s, j) => s + Number(j.service?.spareCharge   || 0), 0);
+  const totalIncome  = allJobs.reduce((s, j) => s + Number(j.service?.income        || 0), 0);
+  const totalOthers  = allJobs.reduce((s, j) => s + Number(j.service?.othersAmount  || 0), 0);
   const totalMargin  = allJobs.reduce((s, j) => s + Number(j.service?.margin        || 0), 0);
   const totalAdvance = allJobs.reduce((s, j) => s + Number(j.service?.advanceAmount || 0), 0);
-  const grandTotal   = totalService + totalSpare;
-  // ✅ NEW counts
+  const grandTotal   = totalService + totalSpare + totalIncome + totalOthers;
   const totalInstaYes  = allJobs.filter(j => j.service?.instaFollowers === "Yes").length;
   const totalGoogleYes = allJobs.filter(j => j.service?.googleReview   === "Yes").length;
 
@@ -182,9 +181,10 @@ useEffect(() => {
     const jobs = data[rep];
     const sc  = jobs.reduce((s, j) => s + Number(j.service?.serviceCharge || 0), 0);
     const sp  = jobs.reduce((s, j) => s + Number(j.service?.spareCharge   || 0), 0);
+    const inc = jobs.reduce((s, j) => s + Number(j.service?.income        || 0), 0);
+    const oth = jobs.reduce((s, j) => s + Number(j.service?.othersAmount  || 0), 0);
     const mg  = jobs.reduce((s, j) => s + Number(j.service?.margin        || 0), 0);
     const adv = jobs.reduce((s, j) => s + Number(j.service?.advanceAmount || 0), 0);
-    // ✅ NEW
     const instaYes  = jobs.filter(j => j.service?.instaFollowers === "Yes").length;
     const googleYes = jobs.filter(j => j.service?.googleReview   === "Yes").length;
     const statusCount = {};
@@ -192,7 +192,7 @@ useEffect(() => {
       const st = j.device?.mobileStatus || "Unknown";
       statusCount[st] = (statusCount[st] || 0) + 1;
     });
-    return { rep, jobs: jobs.length, serviceCharge: sc, spareCharge: sp, margin: mg, advance: adv, total: sc + sp, instaYes, googleYes, statusCount };
+    return { rep, jobs: jobs.length, serviceCharge: sc, spareCharge: sp, income: inc, others: oth, margin: mg, advance: adv, total: sc + sp + inc + oth, instaYes, googleYes, statusCount };
   });
 
   const dashRep  = repFilter || repList[0] || "";
@@ -202,10 +202,12 @@ useEffect(() => {
     const rows = [];
     repList.forEach(rep => {
       data[rep].forEach((job, i) => {
-        const sc = Number(job.service?.serviceCharge || 0);
-        const sp = Number(job.service?.spareCharge   || 0);
+        const sc  = Number(job.service?.serviceCharge || 0);
+        const sp  = Number(job.service?.spareCharge   || 0);
+        const inc = Number(job.service?.income         || 0);
+        const oth = Number(job.service?.othersAmount   || 0);
         rows.push({
-          "Service Rep":      job.service?.serviceRep || rep,
+          "Service Rep":    job.service?.serviceRep || rep,
           "Created By":     job.createdBy?.username || "—",
           "SL No":          i + 1,
           "Job Sheet":      job.jobSheetNo,
@@ -215,14 +217,14 @@ useEffect(() => {
           "Status":         job.device?.mobileStatus || "—",
           "Service Charge": sc,
           "Spare Charge":   sp,
+          "Income":         inc,
+          "Others":         oth,
           "Margin":         Number(job.service?.margin        || 0),
           "Advance":        Number(job.service?.advanceAmount || 0),
           "Advance Date":   job.service?.advanceDate
-  ? new Date(job.service.advanceDate).toLocaleDateString("en-IN")
-  : "—",
-
-          "Total":          sc + sp,
-          // ✅ NEW
+            ? new Date(job.service.advanceDate).toLocaleDateString("en-IN")
+            : "—",
+          "Total":          sc + sp + inc + oth,
           "Insta Follow":   job.service?.instaFollowers || "—",
           "Google Review":  job.service?.googleReview   || "—",
           "Date":           new Date(job.createdAt).toLocaleDateString(),
@@ -248,101 +250,100 @@ useEffect(() => {
   return (
     <div style={{ maxWidth: 1400, margin: "0 auto", padding: "24px 16px", fontFamily: "system-ui, sans-serif" }}>
 
-      {/* TITLE + VIEW TOGGLE */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12, marginBottom: 20 }}>
-      <h4 style={{ fontWeight: 700, margin: 0, fontSize: 20 }}>
-  🧑‍💼 {currentRole !== "admin" ? `${currentName}'s Report` : "Service Rep Report"}
-</h4>
+        <h4 style={{ fontWeight: 700, margin: 0, fontSize: 20, display: "flex", alignItems: "center", gap: 8 }}>
+          <FaUserTie /> {currentRole !== "admin" ? `${currentName}'s Report` : "Service Rep Report"}
+        </h4>
         <div style={{ display: "flex", background: "#f1f3f5", borderRadius: 8, padding: 3 }}>
-          {[["table", "📋 Table"], ["dashboard", "📊 Dashboard"]].map(([val, label]) => (
+          {[["table", "Table", FaTable], ["dashboard", "Dashboard", FaChartBar]].map(([val, label, Icon]) => (
             <button key={val} onClick={() => setView(val)} style={{
               padding: "6px 16px", borderRadius: 6, border: "none", cursor: "pointer",
-              fontSize: 13, fontWeight: 500,
+              fontSize: 13, fontWeight: 500, display: "flex", alignItems: "center", gap: 6,
               background: view === val ? "#fff"    : "transparent",
               color:      view === val ? "#0d6efd" : "#6c757d",
               boxShadow:  view === val ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
-            }}>{label}</button>
+            }}><Icon size={12} /> {label}</button>
           ))}
         </div>
       </div>
 
-      {/* SUMMARY CARDS — ✅ added Insta + Google */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(140px,1fr))", gap: 10, marginBottom: 20 }}>
-        <SummaryCard label="Total Reps"    value={repList.length} />
-        <SummaryCard label="Total Jobs"    value={totalJobs} />
-        <SummaryCard label="Today's Jobs"  value={todayJobs} />
-        <SummaryCard label="Service Total" value={fmt(totalService)}  accent="#7c3aed" />
-        <SummaryCard label="Spare Total"   value={fmt(totalSpare)}    accent="#db2777" />
-        <SummaryCard label="Grand Total"   value={fmt(grandTotal)}    accent="#059669" />
-        <SummaryCard label="Total Advance" value={fmt(totalAdvance)}  accent="#0d6efd" />
+        <SummaryCard label="Total Reps"    value={repList.length} icon={<FaUserTie size={11} color="#6c757d" />} />
+        <SummaryCard label="Total Jobs"    value={totalJobs} icon={<FaTable size={11} color="#6c757d" />} />
+        <SummaryCard label="Today's Jobs"  value={todayJobs} icon={<FaCalendarAlt size={11} color="#6c757d" />} />
+        <SummaryCard label="Service Total" value={fmt(totalService)}  accent="#7c3aed" icon={<FaWrench size={11} color="#7c3aed" />} />
+        <SummaryCard label="Spare Total"   value={fmt(totalSpare)}    accent="#db2777" icon={<FaCogs size={11} color="#db2777" />} />
+        <SummaryCard label="Income Total"  value={fmt(totalIncome)}   accent="#0e7490" icon={<FaRupeeSign size={11} color="#0e7490" />} />
+        <SummaryCard label="Others Total"  value={fmt(totalOthers)}   accent="#c2410c" icon={<FaBoxOpen size={11} color="#c2410c" />} />
+        <SummaryCard label="Grand Total"   value={fmt(grandTotal)}    accent="#059669" icon={<FaCoins size={11} color="#059669" />} />
+        <SummaryCard label="Total Advance" value={fmt(totalAdvance)}  accent="#0d6efd" icon={<FaHandHoldingUsd size={11} color="#0d6efd" />} />
         <SummaryCard label="Total Margin"  value={fmt(totalMargin)}   accent="#f59e0b" />
-        <SummaryCard label="📸 Instagram"  value={totalInstaYes}      accent="#e11d48" />
-        <SummaryCard label="⭐ Google Review" value={totalGoogleYes}     accent="#d97706" />
+        <SummaryCard label="Instagram"     value={totalInstaYes}      accent="#e11d48" icon={<FaInstagram size={11} color="#e11d48" />} />
+        <SummaryCard label="Google Review" value={totalGoogleYes}     accent="#d97706" icon={<FaStar size={11} color="#d97706" />} />
       </div>
 
- {currentRole === "admin" ? (
-  <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap", alignItems: "flex-end" }}>
-    <input className="form-control" style={{ maxWidth: 240 }}
-      placeholder="Search service rep name..."
-      value={searchText}
-      onChange={e => setSearchText(e.target.value)}
-      onKeyDown={e => e.key === "Enter" && handleSearch()} />
-    <div>
-      <div style={{ fontSize: 11, color: "#6c757d", marginBottom: 3 }}>From</div>
-      <input type="date" className="form-control" style={{ maxWidth: 150 }} value={fromDate} onChange={e => setFromDate(e.target.value)} />
-    </div>
-    <div>
-      <div style={{ fontSize: 11, color: "#6c757d", marginBottom: 3 }}>To</div>
-      <input type="date" className="form-control" style={{ maxWidth: 150 }} value={toDate} onChange={e => setToDate(e.target.value)} />
-    </div>
-    <button className="btn btn-primary" onClick={handleSearch}>Search</button>
-    {(searchText || fromDate || toDate) && (
-      <button className="btn btn-outline-secondary" onClick={handleClear}>Clear</button>
-    )}
-    <button className="btn btn-success ms-auto" onClick={handleExcel} disabled={repList.length === 0}>
-      ⬇ Excel
-    </button>
-  </div>
-) : (
-  <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap", alignItems: "flex-end" }}>
-    <div>
-      <div style={{ fontSize: 11, color: "#6c757d", marginBottom: 3 }}>From</div>
-      <input type="date" className="form-control" style={{ maxWidth: 150 }} value={fromDate} onChange={e => setFromDate(e.target.value)} />
-    </div>
-    <div>
-      <div style={{ fontSize: 11, color: "#6c757d", marginBottom: 3 }}>To</div>
-      <input type="date" className="form-control" style={{ maxWidth: 150 }} value={toDate} onChange={e => setToDate(e.target.value)} />
-    </div>
-    <button className="btn btn-primary" onClick={() => fetchData(currentName, fromDate, toDate)}>Search</button>
-    <button className="btn btn-success ms-auto" onClick={handleExcel} disabled={repList.length === 0}>
-      ⬇ Excel
-    </button>
-  </div>
-)}
+      {currentRole === "admin" ? (
+        <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <input className="form-control" style={{ maxWidth: 240 }}
+            placeholder="Search service rep name..."
+            value={searchText}
+            onChange={e => setSearchText(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && handleSearch()} />
+          <div>
+            <div style={{ fontSize: 11, color: "#6c757d", marginBottom: 3 }}>From</div>
+            <input type="date" className="form-control" style={{ maxWidth: 150 }} value={fromDate} onChange={e => setFromDate(e.target.value)} />
+          </div>
+          <div>
+            <div style={{ fontSize: 11, color: "#6c757d", marginBottom: 3 }}>To</div>
+            <input type="date" className="form-control" style={{ maxWidth: 150 }} value={toDate} onChange={e => setToDate(e.target.value)} />
+          </div>
+          <button className="btn btn-primary d-flex align-items-center gap-1" onClick={handleSearch}><FaSearch size={12} /> Search</button>
+          {(searchText || fromDate || toDate) && (
+            <button className="btn btn-outline-secondary d-flex align-items-center gap-1" onClick={handleClear}><FaTimes size={12} /> Clear</button>
+          )}
+          <button className="btn btn-success ms-auto d-flex align-items-center gap-1" onClick={handleExcel} disabled={repList.length === 0}>
+            <FaFileExcel size={13} /> Excel
+          </button>
+        </div>
+      ) : (
+        <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <div>
+            <div style={{ fontSize: 11, color: "#6c757d", marginBottom: 3 }}>From</div>
+            <input type="date" className="form-control" style={{ maxWidth: 150 }} value={fromDate} onChange={e => setFromDate(e.target.value)} />
+          </div>
+          <div>
+            <div style={{ fontSize: 11, color: "#6c757d", marginBottom: 3 }}>To</div>
+            <input type="date" className="form-control" style={{ maxWidth: 150 }} value={toDate} onChange={e => setToDate(e.target.value)} />
+          </div>
+          <button className="btn btn-primary d-flex align-items-center gap-1" onClick={() => fetchData(currentName, fromDate, toDate)}><FaSearch size={12} /> Search</button>
+          <button className="btn btn-success ms-auto d-flex align-items-center gap-1" onClick={handleExcel} disabled={repList.length === 0}>
+            <FaFileExcel size={13} /> Excel
+          </button>
+        </div>
+      )}
       {loading && <div className="text-center py-4 text-muted">Loading...</div>}
       {!loading && repList.length === 0 && <div className="text-center text-muted py-4">No data found</div>}
 
-      {/* ══ TABLE VIEW ══ */}
       {!loading && view === "table" && repList.map((rep, idx) => {
         const jobs = data[rep];
         const uSC  = jobs.reduce((s, j) => s + Number(j.service?.serviceCharge || 0), 0);
         const uSP  = jobs.reduce((s, j) => s + Number(j.service?.spareCharge   || 0), 0);
+        const uINC = jobs.reduce((s, j) => s + Number(j.service?.income        || 0), 0);
+        const uOTH = jobs.reduce((s, j) => s + Number(j.service?.othersAmount  || 0), 0);
         const uMG  = jobs.reduce((s, j) => s + Number(j.service?.margin        || 0), 0);
         const uADV = jobs.reduce((s, j) => s + Number(j.service?.advanceAmount || 0), 0);
-        const uTOT = uSC + uSP;
-        // ✅ NEW
+        const uTOT = uSC + uSP + uINC + uOTH;
         const uInsta  = jobs.filter(j => j.service?.instaFollowers === "Yes").length;
         const uGoogle = jobs.filter(j => j.service?.googleReview   === "Yes").length;
 
         return (
           <div key={rep} style={{ border: "1px solid #e9ecef", borderRadius: 10, overflow: "hidden", marginBottom: 28, boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
 
-            {/* REP HEADER */}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, padding: "10px 16px", background: "#f8f9fa", borderBottom: "1px solid #e9ecef" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <Avatar name={rep} idx={idx} />
                 <div>
-                  <span style={{ fontWeight: 700, fontSize: 15 }}>🧑‍💼 {rep}</span>
+                  <span style={{ fontWeight: 700, fontSize: 15, display: "inline-flex", alignItems: "center", gap: 6 }}><FaUserTie size={13} /> {rep}</span>
                   <span style={{ fontSize: 12, color: "#6c757d", marginLeft: 8 }}>{jobs.length} jobs</span>
                 </div>
               </div>
@@ -350,11 +351,13 @@ useEffect(() => {
                 {[
                   { label: "Service",   val: fmt(uSC),  color: "#7c3aed" },
                   { label: "Spare",     val: fmt(uSP),  color: "#db2777" },
+                  { label: "Income",    val: fmt(uINC), color: "#0e7490" },
+                  { label: "Others",    val: fmt(uOTH), color: "#c2410c" },
                   { label: "Total",     val: fmt(uTOT), color: "#059669" },
                   { label: "Advance",   val: fmt(uADV), color: "#0d6efd" },
                   { label: "Margin",    val: fmt(uMG),  color: "#f59e0b" },
-                  { label: "📸 Insta",  val: uInsta,    color: "#e11d48" }, // ✅ NEW
-                  { label: "⭐ Google", val: uGoogle,   color: "#d97706" }, // ✅ NEW
+                  { label: "Insta",  val: uInsta,    color: "#e11d48" },
+                  { label: "Google", val: uGoogle,   color: "#d97706" },
                 ].map(p => (
                   <div key={p.label} style={{ background: "#fff", border: "1px solid #e9ecef", borderRadius: 20, padding: "3px 12px", fontSize: 12 }}>
                     <span style={{ color: "#6c757d" }}>{p.label}: </span>
@@ -364,25 +367,22 @@ useEffect(() => {
               </div>
             </div>
 
-            {/* TABLE */}
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <TableHead />
                 <tbody>
                   {jobs.map((job, i) => <JobRow key={job._id} job={job} i={i} rep={rep} />)}
 
-                  {/* SUBTOTAL — colSpan 8 covers #,jobsheet,salesrep,createdby,customer,contact,device,status */}
                   <tr style={{ background: "#f0fdf4", borderTop: "2px solid #bbf7d0" }}>
                     <td colSpan={8} style={{ padding: "8px 10px", fontWeight: 700, fontSize: 13, color: "#166534" }}>Subtotal — {rep}</td>
                     <td style={{ padding: "8px 10px", fontWeight: 700, color: "#7c3aed" }}>{fmt(uSC)}</td>
                     <td style={{ padding: "8px 10px", fontWeight: 700, color: "#db2777" }}>{fmt(uSP)}</td>
+                    <td style={{ padding: "8px 10px", fontWeight: 700, color: "#0e7490" }}>{fmt(uINC)}</td>
+                    <td style={{ padding: "8px 10px", fontWeight: 700, color: "#c2410c" }}>{fmt(uOTH)}</td>
                     <td style={{ padding: "8px 10px", fontWeight: 700, color: "#f59e0b" }}>{fmt(uMG)}</td>
-{/* Subtotal row-ல் Advance ₹ td-கு அடுத்தே */}
-<td style={{ padding: "8px 10px", fontWeight: 700, color: "#0d6efd" }}>{fmt(uADV)}</td>
-<td /> {/* ✅ Adv. Date — empty */}
-<td style={{ padding: "8px 10px", fontWeight: 700, color: "#059669" }}>{fmt(uTOT)}</td>
+                    <td style={{ padding: "8px 10px", fontWeight: 700, color: "#0d6efd" }}>{fmt(uADV)}</td>
+                    <td />
                     <td style={{ padding: "8px 10px", fontWeight: 700, color: "#059669" }}>{fmt(uTOT)}</td>
-                    {/* ✅ NEW */}
                     <td style={{ padding: "8px 10px", fontWeight: 700, color: "#e11d48", textAlign: "center" }}>{uInsta}</td>
                     <td style={{ padding: "8px 10px", fontWeight: 700, color: "#d97706", textAlign: "center" }}>{uGoogle}</td>
                     <td />
@@ -394,7 +394,6 @@ useEffect(() => {
         );
       })}
 
-      {/* ══ DASHBOARD VIEW ══ */}
       {!loading && view === "dashboard" && (
         <div>
           <div style={{ marginBottom: 20 }}>
@@ -405,7 +404,6 @@ useEffect(() => {
             </select>
           </div>
 
-          {/* ALL REPS OVERVIEW — ✅ added Insta + Google columns */}
           {!repFilter && (
             <div style={{ border: "1px solid #e9ecef", borderRadius: 10, overflow: "hidden", marginBottom: 28, boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
               <div style={{ padding: "10px 16px", background: "#f8f9fa", borderBottom: "1px solid #e9ecef", fontWeight: 600, fontSize: 14 }}>All Service Reps — Overview</div>
@@ -413,7 +411,7 @@ useEffect(() => {
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                   <thead>
                     <tr style={{ background: "#f8f9fa" }}>
-                      {["Service Rep", "Total Jobs", "Service ₹", "Spare ₹", "Total ₹", "Advance ₹", "Margin ₹", "📸 Insta Yes", "⭐ Google Yes"].map(h => (
+                      {["Service Rep", "Total Jobs", "Service ₹", "Spare ₹", "Income ₹", "Others ₹", "Total ₹", "Advance ₹", "Margin ₹", "Insta Yes", "Google Yes"].map(h => (
                         <th key={h} style={{ padding: "9px 12px", borderBottom: "1px solid #e9ecef", color: "#6c757d", fontWeight: 500, fontSize: 12, whiteSpace: "nowrap" }}>{h}</th>
                       ))}
                     </tr>
@@ -427,7 +425,7 @@ useEffect(() => {
                         <td style={{ padding: "9px 12px" }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                             <Avatar name={u.rep} idx={idx} />
-                            <span style={{ fontWeight: 600 }}>🧑‍💼 {u.rep}</span>
+                            <span style={{ fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 6 }}><FaUserTie size={12} /> {u.rep}</span>
                           </div>
                         </td>
                         <td style={{ padding: "9px 12px", textAlign: "center" }}>
@@ -435,10 +433,11 @@ useEffect(() => {
                         </td>
                         <td style={{ padding: "9px 12px", color: "#7c3aed", fontWeight: 600 }}>{fmt(u.serviceCharge)}</td>
                         <td style={{ padding: "9px 12px", color: "#db2777", fontWeight: 600 }}>{fmt(u.spareCharge)}</td>
+                        <td style={{ padding: "9px 12px", color: "#0e7490", fontWeight: 600 }}>{fmt(u.income)}</td>
+                        <td style={{ padding: "9px 12px", color: "#c2410c", fontWeight: 600 }}>{fmt(u.others)}</td>
                         <td style={{ padding: "9px 12px", color: "#059669", fontWeight: 700 }}>{fmt(u.total)}</td>
                         <td style={{ padding: "9px 12px", color: "#0d6efd", fontWeight: 600 }}>{fmt(u.advance)}</td>
                         <td style={{ padding: "9px 12px", color: "#f59e0b", fontWeight: 600 }}>{fmt(u.margin)}</td>
-                        {/* ✅ NEW */}
                         <td style={{ padding: "9px 12px", color: "#e11d48", fontWeight: 600, textAlign: "center" }}>{u.instaYes}</td>
                         <td style={{ padding: "9px 12px", color: "#d97706", fontWeight: 600, textAlign: "center" }}>{u.googleYes}</td>
                       </tr>
@@ -448,10 +447,11 @@ useEffect(() => {
                       <td style={{ padding: "9px 12px", textAlign: "center", fontWeight: 700 }}>{totalJobs}</td>
                       <td style={{ padding: "9px 12px", fontWeight: 700, color: "#7c3aed" }}>{fmt(totalService)}</td>
                       <td style={{ padding: "9px 12px", fontWeight: 700, color: "#db2777" }}>{fmt(totalSpare)}</td>
+                      <td style={{ padding: "9px 12px", fontWeight: 700, color: "#0e7490" }}>{fmt(totalIncome)}</td>
+                      <td style={{ padding: "9px 12px", fontWeight: 700, color: "#c2410c" }}>{fmt(totalOthers)}</td>
                       <td style={{ padding: "9px 12px", fontWeight: 700, color: "#059669" }}>{fmt(grandTotal)}</td>
                       <td style={{ padding: "9px 12px", fontWeight: 700, color: "#0d6efd" }}>{fmt(totalAdvance)}</td>
                       <td style={{ padding: "9px 12px", fontWeight: 700, color: "#f59e0b" }}>{fmt(totalMargin)}</td>
-                      {/* ✅ NEW */}
                       <td style={{ padding: "9px 12px", fontWeight: 700, color: "#e11d48", textAlign: "center" }}>{totalInstaYes}</td>
                       <td style={{ padding: "9px 12px", fontWeight: 700, color: "#d97706", textAlign: "center" }}>{totalGoogleYes}</td>
                     </tr>
@@ -461,7 +461,6 @@ useEffect(() => {
             </div>
           )}
 
-          {/* SINGLE REP DETAIL */}
           {repFilter && dashRep && (
             <div>
               <button className="btn btn-outline-secondary btn-sm mb-3" onClick={() => setRepFilter("")}>← All Reps</button>
@@ -472,19 +471,20 @@ useEffect(() => {
                   <div>
                     <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
                       <Avatar name={u.rep} idx={repList.indexOf(u.rep)} />
-                      <span style={{ fontWeight: 700, fontSize: 16 }}>🧑‍💼 {u.rep}</span>
+                      <span style={{ fontWeight: 700, fontSize: 16, display: "inline-flex", alignItems: "center", gap: 6 }}><FaUserTie size={14} /> {u.rep}</span>
                       <span style={{ fontSize: 13, color: "#6c757d" }}>{u.jobs} jobs</span>
                     </div>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(140px,1fr))", gap: 10, marginBottom: 20 }}>
                       <SummaryCard label="Total Jobs"     value={u.jobs} />
-                      <SummaryCard label="Service Charge" value={fmt(u.serviceCharge)} accent="#7c3aed" />
-                      <SummaryCard label="Spare Charge"   value={fmt(u.spareCharge)}   accent="#db2777" />
-                      <SummaryCard label="Total Amount"   value={fmt(u.total)}          accent="#059669" />
-                      <SummaryCard label="Advance"        value={fmt(u.advance)}        accent="#0d6efd" />
+                      <SummaryCard label="Service Charge" value={fmt(u.serviceCharge)} accent="#7c3aed" icon={<FaWrench size={11} color="#7c3aed" />} />
+                      <SummaryCard label="Spare Charge"   value={fmt(u.spareCharge)}   accent="#db2777" icon={<FaCogs size={11} color="#db2777" />} />
+                      <SummaryCard label="Income"         value={fmt(u.income)}        accent="#0e7490" icon={<FaRupeeSign size={11} color="#0e7490" />} />
+                      <SummaryCard label="Others"         value={fmt(u.others)}        accent="#c2410c" icon={<FaBoxOpen size={11} color="#c2410c" />} />
+                      <SummaryCard label="Total Amount"   value={fmt(u.total)}          accent="#059669" icon={<FaCoins size={11} color="#059669" />} />
+                      <SummaryCard label="Advance"        value={fmt(u.advance)}        accent="#0d6efd" icon={<FaHandHoldingUsd size={11} color="#0d6efd" />} />
                       <SummaryCard label="Margin"         value={fmt(u.margin)}         accent="#f59e0b" />
-                      {/* ✅ NEW */}
-                      <SummaryCard label="📸 Insta Yes"  value={u.instaYes}             accent="#e11d48" />
-                      <SummaryCard label="⭐ Google Yes" value={u.googleYes}            accent="#d97706" />
+                      <SummaryCard label="Insta Yes"  value={u.instaYes}             accent="#e11d48" icon={<FaInstagram size={11} color="#e11d48" />} />
+                      <SummaryCard label="Google Yes" value={u.googleYes}            accent="#d97706" icon={<FaStar size={11} color="#d97706" />} />
                     </div>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 20 }}>
                       {Object.entries(u.statusCount).map(([st, cnt]) => {
@@ -518,4 +518,4 @@ useEffect(() => {
   );
 };
 
-export default ServiceRepReportPage
+export default ServiceRepReportPage;
