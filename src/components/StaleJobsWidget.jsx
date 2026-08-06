@@ -8,7 +8,7 @@ const StaleJobsWidget = ({ API }) => {
   const [days, setDays]           = useState(3);
   const [collapsed, setCollapsed] = useState(false);
   const navigate = useNavigate();
-
+// code
   const fetchStale = async () => {
     setLoading(true);
     try {

@@ -454,7 +454,13 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
 
     setSaving(true);
 
-    const user = JSON.parse(sessionStorage.getItem("user"));
+   const user = JSON.parse(sessionStorage.getItem("user") || "null");
+
+if (!user || !user.username) {
+  alert("⚠️ Session expired! Please logout and login again, then try saving.");
+  setSaving(false);
+  return;
+}
 
     try {
       const formData = new FormData();
@@ -485,7 +491,7 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
       formData.append("spareItems", JSON.stringify(spareItems));
       formData.append("idProofType", idProofType);
       if (idProofImage) formData.append("idProofImage", idProofImage);
-      if (user) formData.append("createdBy", JSON.stringify({ username: user.username, role: user.role }));
+     formData.append("createdBy", JSON.stringify({ username: user.username, role: user.role }));
 
       const res = await axios.post(`${API}/api/jobsheets`, formData, {
         headers: { "Content-Type": "multipart/form-data" }
@@ -767,6 +773,8 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
         color: "#fff", padding: "7px 18px", display: "flex",
         justifyContent: "space-between", alignItems: "center"
       }}>
+
+        
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
        
           <span style={{ fontWeight: 800, fontSize: 18 }}>RADNUS</span>
@@ -775,6 +783,8 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
             padding: "2px 8px", borderRadius: 4
           }}>SERVICE PRO</span>
         <span style={{ opacity: 0.5 }}>|</span>
+
+
           <span style={{ fontWeight: 700, fontSize: 16 }}>Job Sheet</span>
         </div>
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
