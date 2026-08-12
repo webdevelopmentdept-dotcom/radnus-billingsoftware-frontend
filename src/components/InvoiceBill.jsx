@@ -18,7 +18,7 @@ const InvoiceBill = () => {
 
   if (!job) return <p>Loading...</p>;
 
-  const items =
+ const items =
     job.items?.length > 0
       ? job.items
       : [
@@ -27,7 +27,7 @@ const InvoiceBill = () => {
             model: job.device?.model,
             imei: job.device?.imei,
             fault: job.visualIssues?.join(", "),
-            service: job.service?.serviceCharge,
+            service: job.service?.income,
             spare: job.service?.spareCharge,
           },
         ];

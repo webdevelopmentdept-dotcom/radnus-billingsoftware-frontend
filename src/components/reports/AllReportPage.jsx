@@ -85,7 +85,7 @@ const AllReportPage = () => {
       "Engineer":           item.service?.engineer || "-",
       "Dealer":             item.service?.dealer || "-",
       "Drawer":             item.service?.drawer || "-",
-      "Total":              (Number(item.service?.serviceCharge || 0) + Number(item.service?.spareCharge || 0)),
+      "Total":              (Number(item.service?.income || 0) + Number(item.service?.spareCharge || 0)),
       "Payment Mode":       item.service?.paymentMode || "-",
       "Estimate":           item.service?.estimate || "-",
       "Repair Date":        item.service?.repairDate ? new Date(item.service.repairDate).toLocaleDateString("en-IN") : "-",
@@ -118,14 +118,15 @@ const AllReportPage = () => {
     XLSX.writeFile(wb, `All_Report_${fromDate || "all"}_to_${toDate || "all"}.xlsx`);
   };
 
-  const getStatusStyle = (s) => {
-    if (s === "Delivered")       return { background: "#d1fae5", color: "#065f46", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 600, whiteSpace: "nowrap" };
-    if (s === "Pending")         return { background: "#fef3c7", color: "#92400e", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 600, whiteSpace: "nowrap" };
-    if (s === "Received")        return { background: "#dbeafe", color: "#1e40af", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 600, whiteSpace: "nowrap" };
-    if (s === "Delivered NR/NA") return { background: "#fee2e2", color: "#991b1b", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 600, whiteSpace: "nowrap" };
-    if (s === "Cancelled")       return { background: "#fee2e2", color: "#991b1b", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 600, whiteSpace: "nowrap" };
-    return { background: "#f3f4f6", color: "#374151", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 600 };
-  };
+ const getStatusStyle = (s) => {
+  if (s === "Delivered")       return { background: "#d1fae5", color: "#065f46", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 600, whiteSpace: "nowrap" };
+  if (s === "Pending")         return { background: "#fef3c7", color: "#92400e", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 600, whiteSpace: "nowrap" };
+  if (s === "Received")        return { background: "#dbeafe", color: "#1e40af", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 600, whiteSpace: "nowrap" };
+  if (s === "Repaired")        return { background: "#e0e7ff", color: "#3730a3", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 600, whiteSpace: "nowrap" }; // 👈 new
+  if (s === "Delivered NR/NA") return { background: "#fee2e2", color: "#991b1b", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 600, whiteSpace: "nowrap" };
+  if (s === "Cancelled")       return { background: "#fee2e2", color: "#991b1b", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 600, whiteSpace: "nowrap" };
+  return { background: "#f3f4f6", color: "#374151", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 600 };
+};
 
   // ✅ Insta / Google badge helper
   const socialBadge = (val) => {
@@ -139,9 +140,9 @@ const AllReportPage = () => {
     return <span style={{ fontSize: 11 }}>{val}</span>;
   };
 
-  const totalService = filteredData.reduce((s, i) => s + Number(i.service?.serviceCharge || 0), 0);
-  const totalSpare   = filteredData.reduce((s, i) => s + Number(i.service?.spareCharge || 0), 0);
-  const totalAmount  = totalService + totalSpare;
+const totalService = filteredData.reduce((s, i) => s + Number(i.service?.income || 0), 0);
+const totalSpare   = filteredData.reduce((s, i) => s + Number(i.service?.spareCharge || 0), 0);
+const totalAmount  = totalService + totalSpare;
 
   const headers = [
     "SL", "Date", "Job No", "Name", "Contact", "Alt Contact",
@@ -181,12 +182,13 @@ const AllReportPage = () => {
             <label style={{ fontSize: "11px", color: "#64748b", fontWeight: 600 }}>Status</label>
             <select value={status} onChange={e => setStatus(e.target.value)}
               style={{ border: "1px solid #cbd5e1", borderRadius: "8px", padding: "7px 10px", fontSize: "13px", width: "150px" }}>
-              <option value="">All Status</option>
-              <option value="Received">Received</option>
-              <option value="Pending">Pending</option>
-              <option value="Delivered">Delivered</option>
-              <option value="Delivered NR/NA">Delivered NR/NA</option>
-              <option value="Cancelled">Cancelled</option>
+            <option value="">All Status</option>
+<option value="Received">Received</option>
+<option value="Pending">Pending</option>
+<option value="Repaired">Repaired</option>   {/* 👈 new */}
+<option value="Delivered">Delivered</option>
+<option value="Delivered NR/NA">Delivered NR/NA</option>
+<option value="Cancelled">Cancelled</option>
             </select>
           </div>
 
@@ -276,8 +278,8 @@ const AllReportPage = () => {
                 </td></tr>
               ) : filteredData.length > 0 ? (
                 filteredData.map((item, index) => {
-                  const svc   = Number(item.service?.serviceCharge || 0);
-                  const spare = Number(item.service?.spareCharge   || 0);
+              const svc   = Number(item.service?.income || 0);
+const spare = Number(item.service?.spareCharge   || 0);
                   const rowBg = index % 2 === 0 ? "#fff" : "#f8fafc";
                   const td    = { padding: "8px 8px", borderBottom: "1px solid #e2e8f0", borderRight: "1px solid #e2e8f0", whiteSpace: "nowrap", color: "#1e293b" };
                   return (

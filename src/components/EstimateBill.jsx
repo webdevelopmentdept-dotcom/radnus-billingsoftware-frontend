@@ -41,10 +41,9 @@ const EstimateBill = () => {
   const val = (v) => (v ? v : "NIL");
 
 
-  const total =
-    Number(data.service?.serviceCharge || 0) +
+ const total =
+    Number(data.service?.income || 0) +
     Number(data.service?.spareCharge || 0);
-
 
   /* ================= PRINT ================= */
 
@@ -392,8 +391,8 @@ body{background:#fff}
             <div className="estimate-box">
 
               <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span>Service Charge</span>
-                <span>₹ {data.service?.serviceCharge || 0}</span>
+             <span>Service Charge</span>
+<span>₹ {data.service?.income || 0}</span>
               </div>
 
               <div style={{ display: "flex", justifyContent: "space-between", marginTop: 5 }}>
