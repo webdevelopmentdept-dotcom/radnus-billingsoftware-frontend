@@ -21,7 +21,7 @@ const isValidEmail = (email) =>
 const isValidPhone = (phone) => /^\d{10}$/.test(phone);
 const isValidIMEI = (imei) => /^\d{15}$/.test(imei);
 const isRequired = (value) => value && value.toString().trim().length > 0;
-const MAX_JOBS = 5;
+
 const onlyNumbers = (value) => value.replace(/\D/g, "");
 
 /* ================= RADNUS THEME (SOFTENED) ================= */
@@ -264,9 +264,6 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
     );
   };
 
-
-  /* ── WORKLOAD MAP: { "Barani": 4, "Ajith": 5 } ── */
-  const [workloadMap, setWorkloadMap] = useState({});
 
   useEffect(() => {
     axios.get(`${API}/api/engineers`)
@@ -710,27 +707,7 @@ if (!user || !user.username) {
     { label: "Other (Add New)", value: "__custom" }
   ];
   /* ── WORKLOAD BADGE HELPER ── */
-  const getWorkloadBadge = (engName) => {
-    const count = workloadMap[engName] || 0;
-    const free = MAX_JOBS - count;
-
-    if (count >= MAX_JOBS)
-      return {
-        label: `${engName} (FULL 🔴)`,
-        disabled: true
-      };
-
-    if (count >= 4)
-      return {
-        label: `${engName} (${free} slot ⚠️)`,
-        disabled: false
-      };
-
-    return {
-      label: `${engName} (${free} free ✅)`,
-      disabled: false
-    };
-  };
+;
   return (
     <div
       style={{ minHeight: "100vh", background: "#f6f7f9" }}
@@ -1178,42 +1155,21 @@ if (!user || !user.username) {
                   <div className="row g-2">
 
                       <div className="col-md-3">
-                        <select
-                          className="form-select form-select-sm"
-                          value={engineer}
-                          onChange={e => setEngineer(e.target.value)}
-                          style={{ borderColor: engineer && (workloadMap[engineer] || 0) >= MAX_JOBS ? "#ef4444" : "" }}
-                        >
-                          <option value="">Select Engineer</option>
-                          {engineerList.map((eng, i) => {
-                            const name = eng.name || eng;
-                            const badge = getWorkloadBadge(name);
-                            return (
-                              <option key={i} value={name} disabled={badge.disabled}>
-                                🔧 {badge.label}
-                              </option>
-                            );
-                          })}
-                        </select>
-                        {engineer && (() => {
-                          const count = workloadMap[engineer] || 0;
-                          const free = MAX_JOBS - count;
-                          if (count >= MAX_JOBS) return (
-                            <div style={{ marginTop: 5, fontSize: 11, fontWeight: 600, color: "#991b1b", background: "#fee2e2", borderRadius: 6, padding: "3px 8px" }}>
-                              🔴 Full capacity — choose another engineer
-                            </div>
-                          );
-                          if (count >= 4) return (
-                            <div style={{ marginTop: 5, fontSize: 11, fontWeight: 600, color: "#92400e", background: "#fef3c7", borderRadius: 6, padding: "3px 8px" }}>
-                              ⚠️ {count}/{MAX_JOBS} jobs — {free} slot left
-                            </div>
-                          );
-                          return (
-                            <div style={{ marginTop: 5, fontSize: 11, fontWeight: 500, color: "#166534", background: "#dcfce7", borderRadius: 6, padding: "3px 8px" }}>
-                              ✅ {count}/{MAX_JOBS} jobs — {free} slots free
-                            </div>
-                          );
-                        })()}
+                       <select
+  className="form-select form-select-sm"
+  value={engineer}
+  onChange={e => setEngineer(e.target.value)}
+>
+  <option value="">Select Engineer</option>
+  {engineerList.map((eng, i) => {
+    const name = eng.name || eng;
+    return (
+      <option key={i} value={name}>
+        🔧 {name}
+      </option>
+    );
+  })}
+</select>
                       </div>
 
                       <div className="col-md-3">

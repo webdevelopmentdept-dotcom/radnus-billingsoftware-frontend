@@ -75,9 +75,9 @@ const EngineerValueReport = () => {
 
   const groupedData = groupByDate(data);
 
-  /* TOTAL */
+  /* TOTAL — Income field used for "Service" column (spare charge shown separately, not merged) */
   const totalService = data.reduce(
-    (sum, i) => sum + (i.service?.serviceCharge || 0),
+    (sum, i) => sum + (i.service?.income || 0),
     0
   );
 
@@ -104,7 +104,7 @@ const handleExcelDownload = () => {
 
     // Data rows
     items.forEach((item) => {
-      const s  = item.service?.serviceCharge || 0;
+      const s  = item.service?.income || 0;
       const sp = item.service?.spareCharge   || 0;
       excelRows.push({
         "Job No": item.jobSheetNo || "-",
@@ -120,7 +120,7 @@ const handleExcelDownload = () => {
     });
 
     // Sub total
-    const sTotal  = items.reduce((sum, i) => sum + (i.service?.serviceCharge || 0), 0);
+    const sTotal  = items.reduce((sum, i) => sum + (i.service?.income || 0), 0);
     const spTotal = items.reduce((sum, i) => sum + (i.service?.spareCharge   || 0), 0);
     excelRows.push({
       "Job No": "", "Name": "", "Engineer": "", "Received": "",
@@ -274,7 +274,7 @@ const handleExcelDownload = () => {
                   const items = groupedData[date];
 
                   const serviceTotal = items.reduce(
-                    (sum, i) => sum + (i.service?.serviceCharge || 0),
+                    (sum, i) => sum + (i.service?.income || 0),
                     0
                   );
 
@@ -297,7 +297,7 @@ const handleExcelDownload = () => {
 
                       {/* ROWS */}
                       {items.map((item, i) => {
-                        const s = item.service?.serviceCharge || 0;
+                        const s = item.service?.income || 0;
                         const sp = item.service?.spareCharge || 0;
 
                         return (

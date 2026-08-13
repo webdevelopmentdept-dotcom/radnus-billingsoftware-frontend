@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import axios from "axios";
 import { useNavigate, useParams } from "react-router-dom";
 
-const MAX_JOBS = 5;
+
 
 const STATUS_STEPS = [
   { key: "Received",   label: "📥 Received",   color: "#3b82f6", bg: "#dbeafe" },
@@ -150,15 +150,8 @@ const handleTransfer = async () => {
   if (!transferTo) return alert("Please Select the Engineer !");
   if (transferTo === engineerName) return alert("You can't transfer it to yourself!");
 
-  // ✅ No workload check for Reception
-  if (transferTo !== "Reception") {
-    const targetLoad = workloadMap[transferTo] || 0;
-    if (targetLoad >= MAX_JOBS) {
-      return alert(`⚠️ ${transferTo} is at full capacity!`);
-    }
-  }
-
   setTransferLoading(true);
+  
   try {
     await axios.patch(`${API}/api/jobsheets/${transferJobId}/transfer`, {
       from: engineerName,
@@ -208,13 +201,7 @@ const myLoad = jobs.filter(j =>
   !j.isInvoiced
 ).length;
 
-  const getTransferBadge = (name) => {
-    const count = workloadMap[name] || 0;
-    const free  = MAX_JOBS - count;
-    if (count >= MAX_JOBS) return { label: `${name} — FULL 🔴`, disabled: true };
-    if (count >= 4)        return { label: `${name} — ${free} slot ⚠️`, disabled: false };
-    return                        { label: `${name} — ${free} free ✅`, disabled: false };
-  };
+
 
   return (
     <div style={{ minHeight: "100vh", background: "#f1f5f9" }}>
@@ -236,42 +223,21 @@ const myLoad = jobs.filter(j =>
   {/* ✅ Reception option */}
   <option value="Reception">🏠 Reception (Free up capacity)</option>
   <optgroup label="Engineers">
-    {otherEngineers.map((eng, i) => {
-      const b = getTransferBadge(eng);
-      return <option key={i} value={eng} disabled={b.disabled}>{b.label}</option>;
-    })}
-  </optgroup>
+  {otherEngineers.map((eng, i) => (
+    <option key={i} value={eng}>{eng}</option>
+  ))}
+</optgroup>
 </select>
-            {/* Workload hint for selected target */}
-            {transferTo && (() => {
-              const count = workloadMap[transferTo] || 0;
-              const free  = MAX_JOBS - count;
-              if (count >= MAX_JOBS) return (
-                <div style={{ marginBottom: 12, fontSize: 12, fontWeight: 600, color: "#991b1b", background: "#fee2e2", borderRadius: 6, padding: "5px 10px" }}>
-                  🔴 {transferTo} is full — cannot transfer
-                </div>
-              );
-              if (count >= 4) return (
-                <div style={{ marginBottom: 12, fontSize: 12, fontWeight: 600, color: "#92400e", background: "#fef3c7", borderRadius: 6, padding: "5px 10px" }}>
-                  ⚠️ {transferTo} has {count}/{MAX_JOBS} jobs — {free} slot left
-                </div>
-              );
-              return (
-                <div style={{ marginBottom: 12, fontSize: 12, fontWeight: 500, color: "#166534", background: "#dcfce7", borderRadius: 6, padding: "5px 10px" }}>
-                  ✅ {transferTo} has {count}/{MAX_JOBS} jobs — {free} slots free
-                </div>
-              );
-            })()}
-
+          
             <label style={{ fontSize: "12px", color: "#64748b", fontWeight: 600 }}>Note (optional):</label>
             <textarea rows={2} placeholder="e.g. Step 2 done, IC check பண்ணுங்க" value={transferNote} onChange={e => setTransferNote(e.target.value)}
               style={{ width: "100%", border: "1px solid #cbd5e1", borderRadius: "8px", padding: "8px 10px", fontSize: "13px", marginTop: "4px", marginBottom: "16px", outline: "none", resize: "none", boxSizing: "border-box" }} />
 
             <div style={{ display: "flex", gap: "10px" }}>
-              <button onClick={handleTransfer} disabled={transferLoading || (workloadMap[transferTo] || 0) >= MAX_JOBS}
-                style={{ flex: 1, background: (workloadMap[transferTo] || 0) >= MAX_JOBS ? "#94a3b8" : "#f59e0b", color: "#fff", border: "none", borderRadius: "8px", padding: "10px", fontWeight: 700, cursor: "pointer", fontSize: "13px" }}>
-                {transferLoading ? "⏳ Transferring..." : "🔀 Transfer"}
-              </button>
+        <button onClick={handleTransfer} disabled={transferLoading}
+  style={{ flex: 1, background: "#f59e0b", color: "#fff", border: "none", borderRadius: "8px", padding: "10px", fontWeight: 700, cursor: "pointer", fontSize: "13px" }}>
+  {transferLoading ? "⏳ Transferring..." : "🔀 Transfer"}
+</button>
               <button onClick={() => { setTransferJobId(null); setTransferTo(""); setTransferNote(""); }}
                 style={{ flex: 1, background: "#f1f5f9", color: "#475569", border: "1px solid #cbd5e1", borderRadius: "8px", padding: "10px", fontWeight: 600, cursor: "pointer", fontSize: "13px" }}>
                 Cancel
