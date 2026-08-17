@@ -35,9 +35,8 @@ const LoginModal = ({ show, onClose }) => {
         return;
       }
 
-     // இந்த 2 lines மாத்து
-sessionStorage.setItem("token", data.token);
-sessionStorage.setItem("user", JSON.stringify(data.user));
+      sessionStorage.setItem("token", data.token);
+      sessionStorage.setItem("user", JSON.stringify(data.user));
       onClose();
 
       // ✅ Engineer → /engineer/ajith (name lowercase)
@@ -45,7 +44,8 @@ sessionStorage.setItem("user", JSON.stringify(data.user));
         const engineerPath = (data.user.name || data.user.username).toLowerCase();
         navigate(`/engineer/${engineerPath}`);
       } else {
-        navigate("/home");
+        // ✅ Admin/other roles → direct Job Sheet page (Home illa)
+        navigate("/jobsheet");
       }
 
     } catch (err) {

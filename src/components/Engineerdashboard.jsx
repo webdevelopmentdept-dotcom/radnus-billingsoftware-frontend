@@ -254,14 +254,7 @@ const myLoad = jobs.filter(j =>
           <span style={{ marginLeft: "8px", fontSize: "13px", color: "#60a5fa", fontWeight: 600 }}>/ {engineerName}</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          {/* My workload pill */}
-          <span style={{
-            fontSize: 12, fontWeight: 700, padding: "4px 12px", borderRadius: 20,
-            background: myLoad >= MAX_JOBS ? "#fee2e2" : myLoad >= 4 ? "#fef3c7" : "#dcfce7",
-            color: myLoad >= MAX_JOBS ? "#991b1b" : myLoad >= 4 ? "#92400e" : "#166534",
-          }}>
-            {myLoad}/{MAX_JOBS} active jobs
-          </span>
+         
           <button onClick={handleLogout} style={{ background: "#ef4444", color: "#fff", border: "none", borderRadius: "8px", padding: "7px 16px", fontWeight: 600, cursor: "pointer", fontSize: "13px" }}>
             Logout
           </button>

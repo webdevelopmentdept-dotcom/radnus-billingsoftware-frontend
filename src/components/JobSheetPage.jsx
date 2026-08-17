@@ -8,6 +8,7 @@ import OthersPopup from "./OthersPopup";
 import Select from "react-select";
 import RepairStepsTimeline from "./RepairStepsTimeline";
 import CustomerAutocomplete from "./CustomerAutocomplete";
+import JobSheetSidebar from "./JobSheetSidebar";
 import { useNavigate } from "react-router-dom";
 import {
   FileText, Save, RefreshCw, Calculator, Receipt, Home, Plus, Ban,
@@ -47,6 +48,33 @@ const sideBtnBase = {
   color: "#fff",
 };
 
+/* ================= FIELD LABEL — persistent label above every input (NEW) =================
+   Fixes: once a value is typed, the placeholder disappears and the user can no longer tell
+   which field they're looking at (e.g. Income vs Service Charges). A small permanent label
+   above the field solves this for new/first-time users at a new store. */
+const FieldLabel = ({ children, required }) => (
+  <label
+    className="d-block"
+    style={{
+      fontSize: 14,
+      fontWeight: 500,
+      color: "#000000",
+      marginBottom: 3,
+      letterSpacing: 0.2,
+    }}
+  >
+    {children}
+    {required && <span style={{ color: RED_TEXT }}> *</span>}
+  </label>
+);
+
+const Field = ({ label, required, children }) => (
+  <div>
+    <FieldLabel required={required}>{label}</FieldLabel>
+    {children}
+  </div>
+);
+
 /* ================= BOTTOM ACTION BAR — SOLID COLORFUL BUTTONS (NEW) ================= */
 const sideBtnSave = { ...sideBtnBase, background: "#DC2626" };       // Save / Update — red
 const sideBtnRefresh = { ...sideBtnBase, background: "#475569" };    // Refresh — slate
@@ -73,7 +101,7 @@ const yellowHeader = {
 /* ================= REACT-SELECT DARK TEXT STYLES (NEW) ================= */
 const selectDarkText = {
   control: (base) => ({ ...base, minHeight: 31, borderColor: "#CBD5E1" }),
-  placeholder: (base) => ({ ...base, color: "#6B7280", fontWeight: 500 }),
+  placeholder: (base) => ({ ...base, color: "#6B7280", fontWeight: 400 }),
   singleValue: (base) => ({ ...base, color: "#111827", fontWeight: 500 }),
   input: (base) => ({ ...base, color: "#111827" }),
   option: (base, state) => ({
@@ -83,6 +111,25 @@ const selectDarkText = {
     background: state.isFocused ? "#FEF2F2" : "#fff",
   }),
   multiValueLabel: (base) => ({ ...base, color: "#111827", fontWeight: 500 }),
+};
+
+/* ================= COMPACT SELECT — fixed short height, single-line text (NEW) =================
+   Used for single-value dropdowns (Make, Model) where the placeholder/value should stay on
+   one line instead of wrapping and stretching the field taller than the inputs beside it. */
+const selectCompactText = {
+  ...selectDarkText,
+  control: (base) => ({ ...base, minHeight: 31, height: 31, borderColor: "#CBD5E1" }),
+  valueContainer: (base) => ({ ...base, height: 29, padding: "0 8px", flexWrap: "nowrap" }),
+  indicatorsContainer: (base) => ({ ...base, height: 29 }),
+  input: (base) => ({ ...base, margin: 0, padding: 0, color: "#111827" }),
+  placeholder: (base) => ({
+    ...base, color: "#6B7280", fontWeight: 500,
+    whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+  }),
+  singleValue: (base) => ({
+    ...base, color: "#111827", fontWeight: 500,
+    whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+  }),
 };
 
 /* ================= SELECT OPTIONS (NEW — for Physical Condition & Accessories) ================= */
@@ -307,6 +354,13 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
 
   const [paymentMode, setPaymentMode] = useState("");
   const [income, setIncome] = useState("");
+  // ✅ NEW — tracks the date Income was last actually changed & saved.
+  // Income Report groups by this date, NOT repairDate, so income shows up
+  // in the month it was actually entered (e.g. delivered/collected month).
+  const [incomeDate, setIncomeDate] = useState("");
+  // Holds the income value as it was when the job sheet was loaded/last saved,
+  // used to detect whether the user genuinely changed Income this session.
+  const initialIncomeRef = React.useRef(0);
   const [repairDate, setRepairDate] = useState(today);
   const [deliveryDate, setDeliveryDate] = useState("");
   const [remarks, setRemarks] = useState("");
@@ -315,7 +369,17 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
   const [showAdvancePopup, setShowAdvancePopup] = useState(false);
   const [margin, setMargin] = useState("");
 
-
+  /* ================= AUTO-CALCULATE SERVICE CHARGE (NEW) =================
+     Service Charge (labour) = Income - Spare Charges - Other Expenses.
+     This field is now READ-ONLY and always reflects the remaining amount
+     after spare parts & other expenses are deducted from the total income. */
+  useEffect(() => {
+    const inc = Number(income || 0);
+    const sp = Number(spareCharge || 0);
+    const oth = Number(othersAmount || 0);
+    const remaining = inc - sp - oth;
+    setServiceCharge(remaining > 0 ? String(remaining) : "0");
+  }, [income, spareCharge, othersAmount]);
 
 
   /* ================= VISUAL ISSUES ================= */
@@ -382,6 +446,15 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
       alert("⚠️ Delivery Date cannot be before Repair Date"); return;
     }
 
+    // ✅ Income date logic: if Income was actually changed this session (compared to what
+    // was loaded), stamp today's date. Otherwise keep whatever incomeDate already existed.
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const incomeNum = Number(income || 0);
+    const incomeChanged = incomeNum !== Number(initialIncomeRef.current || 0);
+    const finalIncomeDate = incomeNum > 0
+      ? (incomeChanged ? todayStr : (incomeDate || todayStr))
+      : "";
+
     try {
       const formData = new FormData();
       formData.append("jobSheetNo", jobSheetNo);
@@ -396,7 +469,8 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
         dealer, drawer, serviceRep,
         serviceCharge: Number(serviceCharge || 0),
         spareCharge: Number(spareCharge || 0),
-        income: Number(income || 0),
+        income: incomeNum,
+        incomeDate: finalIncomeDate, // ✅ NEW
 
         othersAmount: Number(othersAmount || 0),
         othersItems,
@@ -425,6 +499,10 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
       if (updatedJob?.service?.advanceDate) {
         setAdvanceDate(updatedJob.service.advanceDate.slice(0, 10));
       }
+
+      // ✅ sync incomeDate + baseline after a successful update
+      setIncomeDate(finalIncomeDate);
+      initialIncomeRef.current = incomeNum;
 
       alert("Job Sheet Updated ✅");
 
@@ -459,6 +537,11 @@ if (!user || !user.username) {
   return;
 }
 
+    // ✅ New job sheet: if Income has a value, today is the income date.
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const incomeNum = Number(income || 0);
+    const finalIncomeDate = incomeNum > 0 ? todayStr : "";
+
     try {
       const formData = new FormData();
       formData.append("jobSheetNo", jobSheetNo);
@@ -477,7 +560,8 @@ if (!user || !user.username) {
         googleReview, advanceDate,
         serviceCharge: Number(serviceCharge || 0),
         spareCharge: Number(spareCharge || 0),
-        income: Number(income || 0),
+        income: incomeNum,
+        incomeDate: finalIncomeDate, // ✅ NEW
 
         othersAmount: Number(othersAmount || 0),
         othersItems,
@@ -545,6 +629,8 @@ if (!user || !user.username) {
     setOthersItems([]);
     setSpareItems([]);
     setIncome("");
+    setIncomeDate("");
+    initialIncomeRef.current = 0;
     setPaymentMode("");
     setRemarks("");
     setAdvanceAmount("");
@@ -608,6 +694,13 @@ if (!user || !user.username) {
     setOthersAmount(editData.service?.othersAmount || "");
     setOthersItems(editData.service?.othersItems || []);
     setIncome(editData.service?.income || "");
+    // ✅ NEW — load incomeDate + baseline for change-detection
+    setIncomeDate(
+      editData.service?.incomeDate
+        ? new Date(editData.service.incomeDate).toISOString().slice(0, 10)
+        : ""
+    );
+    initialIncomeRef.current = Number(editData.service?.income || 0);
     setPaymentMode(editData.service?.paymentMode || "");
     setRepairDate(editData.service?.repairDate?.slice(0, 10) || today);
     setDeliveryDate(editData.service?.deliveryDate?.slice(0, 10) || "");
@@ -710,7 +803,7 @@ if (!user || !user.username) {
 ;
   return (
     <div
-      style={{ minHeight: "100vh", background: "#f6f7f9" }}
+      style={{ minHeight: "100vh", background: "#f6f7f9", display: "flex" }}
       onFocus={(e) => {
         if (["INPUT", "SELECT", "TEXTAREA"].includes(e.target.tagName)) {
           setTimeout(() => {
@@ -743,6 +836,12 @@ if (!user || !user.username) {
           color: #6B7280 !important;
         }
       `}</style>
+
+      {/* ============ LEFT SIDEBAR ============ */}
+      <JobSheetSidebar />
+
+      {/* ============ MAIN CONTENT COLUMN ============ */}
+      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
 
       {/* ============ TOP BAR ============ */}
       <div style={{
@@ -881,16 +980,17 @@ if (!user || !user.username) {
             <div className="col-md-9">
 
             {/* ===== NEW: Customer Details + Device Details side by side ===== */}
-            <div className="row g-2 mb-2">
+            <div className="row g-2 mb-2 align-items-start">
 
               <div className="col-md-6">
-                <div className="card shadow-sm h-100" style={{ borderRadius: 10, overflow: "hidden" }}>
+                <div className="card shadow-sm" style={{ borderRadius: 10, overflow: "hidden" }}>
                   <div className="card-header d-flex align-items-center gap-2" style={yellowHeader}>
                     <User size={16} /> Customer Details
                   </div>
                   <div className="card-body row g-2" style={{ padding: "8px 12px" }}>
 
                     <div className="col-md-6">
+                      <Field label="Customer Name" required>
                       <CustomerAutocomplete
                         type="name"
                         value={customerName}
@@ -905,7 +1005,7 @@ if (!user || !user.username) {
                           setGoogleReview(customer.googleReview === "Already Done" ? "Already Done" : "");
                           setFormErrors(prev => ({ ...prev, customerName: "", contact: "" }));
                         }}
-                        placeholder="Customer Name *"
+                        placeholder="Name"
                         className={`form-control form-control-sm ${touched.customerName && formErrors.customerName ? "is-invalid" :
                             touched.customerName && !formErrors.customerName ? "is-valid" : ""
                           }`}
@@ -913,12 +1013,14 @@ if (!user || !user.username) {
                           onBlur: () => handleBlur("customerName", customerName)
                         }}
                       />
+                      </Field>
                       {touched.customerName && formErrors.customerName && (
                         <div className="invalid-feedback d-block" style={{ fontSize: 11 }}>⚠️ {formErrors.customerName}</div>
                       )}
                     </div>
 
                     <div className="col-md-6">
+                      <Field label="Contact No" required>
                       <CustomerAutocomplete
                         type="contact"
                         value={contact}
@@ -934,7 +1036,7 @@ if (!user || !user.username) {
                           setGoogleReview(customer.googleReview === "Already Done" ? "Already Done" : "");
                           setFormErrors(prev => ({ ...prev, customerName: "", contact: "" }));
                         }}
-                        placeholder="Contact No *"
+                        placeholder="Number"
                         maxLength={10}
                         className={`form-control form-control-sm ${touched.contact && formErrors.contact ? "is-invalid" :
                             touched.contact && !formErrors.contact && contact ? "is-valid" : ""
@@ -943,40 +1045,46 @@ if (!user || !user.username) {
                           onBlur: () => handleBlur("contact", contact)
                         }}
                       />
+                      </Field>
                       {touched.contact && formErrors.contact && (
                         <div className="invalid-feedback d-block" style={{ fontSize: 11 }}>⚠️ {formErrors.contact}</div>
                       )}
                       {touched.contact && !formErrors.contact && contact && (
-                        <div style={{ fontSize: 11, color: "#198754" }}>✅ Valid number</div>
+                        <div style={{ fontSize: 11, color: "#198754" }}> Valid number</div>
                       )}
                     </div>
 
                     <div className="col-md-6">
+                      <Field label="Alt Contact">
                       <input
                         className="form-control form-control-sm"
-                        placeholder="Alt Contact"
+                        placeholder="Alternate "
                         value={altContact}
                         maxLength={10}
                         onChange={(e) => setAltContact(onlyNumbers(e.target.value))}
                       />
+                      </Field>
                     </div>
                     <div className="col-md-6">
+                      <Field label="Customer Address">
                       <textarea
                         rows="2"
                         className="form-control form-control-sm"
-                        placeholder="Customer Address"
+                        placeholder="Address"
                         value={address}
                         onChange={(e) => setAddress(e.target.value)}
                       />
+                      </Field>
                     </div>
 
                     <div className="col-md-6">
+                      <Field label="Email ID">
                       <input
                         type="email"
                         className={`form-control form-control-sm ${touched.email && formErrors.email ? "is-invalid" :
                             touched.email && !formErrors.email && email ? "is-valid" : ""
                           }`}
-                        placeholder="Email ID"
+                        placeholder="name@example.com"
                         value={email}
                         onChange={(e) => {
                           const val = e.target.value.trim().toLowerCase();
@@ -986,15 +1094,17 @@ if (!user || !user.username) {
                         }}
                         onBlur={(e) => handleBlur("email", e.target.value.trim())}
                       />
+                      </Field>
                       {touched.email && formErrors.email && (
                         <div className="invalid-feedback d-block" style={{ fontSize: 11 }}>⚠️ {formErrors.email}</div>
                       )}
                       {touched.email && !formErrors.email && email && (
-                        <div style={{ fontSize: 11, color: "#198754" }}>✅ Valid email</div>
+                        <div style={{ fontSize: 11, color: "#198754" }}> Valid email</div>
                       )}
                     </div>
 
                     <div className="col-md-6">
+                      <Field label="ID Proof Type">
                       <select
                         className="form-select form-select-sm"
                         value={idProofType}
@@ -1008,22 +1118,7 @@ if (!user || !user.username) {
                         <option value="ID Not Required">ID Not Required</option>
                         <option value="Dealer Collected">Dealer Collected</option>
                       </select>
-                    </div>
-
-                    <div className="col-md-6">
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="form-control form-control-sm"
-                        onChange={(e) => {
-                          const file = e.target.files[0];
-                          setIdProofImage(file);
-                          if (file) {
-                            setIdProofPreview(URL.createObjectURL(file));
-                          }
-                        }}
-                        disabled={idProofType === "ID Not Required" || idProofType === "Dealer Collected"}
-                      />
+                      </Field>
                     </div>
 
                   </div>
@@ -1031,13 +1126,14 @@ if (!user || !user.username) {
               </div>
 
               <div className="col-md-6">
-                <div className="card shadow-sm h-100" style={{ borderRadius: 10, overflow: "hidden" }}>
+                <div className="card shadow-sm" style={{ borderRadius: 10, overflow: "hidden" }}>
                   <div className="card-header d-flex align-items-center gap-2" style={yellowHeader}>
                     <Smartphone size={16} /> Device Details
                   </div>
                   <div className="card-body row g-2" style={{ padding: "8px 12px" }}>
 
                     <div className="col-md-6">
+                      <Field label="Make">
                       <Select
                         options={makeOptions}
                         value={makeOptions.find(opt => opt.value === make) || null}
@@ -1047,14 +1143,15 @@ if (!user || !user.username) {
                           setModel("");
                           setCustomModel("");
                         }}
-                        placeholder="Search Make..."
+                        placeholder="Search "
                         isClearable
                         styles={{
-                          ...selectDarkText,
+                          ...selectCompactText,
                           menuPortal: (base) => ({ ...base, zIndex: 9999 }),
                         }}
                         menuPortalTarget={document.body}
                       />
+                      </Field>
                       {make === "__custom" && (
                         <input
                           className="form-control form-control-sm mt-2"
@@ -1066,6 +1163,7 @@ if (!user || !user.username) {
                     </div>
 
                     <div className="col-md-6">
+                      <Field label="Model">
                       <Select
                         options={modelOptions}
                         value={modelOptions.find(opt => opt.value === model) || null}
@@ -1073,14 +1171,15 @@ if (!user || !user.username) {
                           setModel(selected?.value || "");
                           setCustomModel("");
                         }}
-                        placeholder="Search Model..."
+                        placeholder="Search"
                         isClearable
                         styles={{
-                          ...selectDarkText,
+                          ...selectCompactText,
                           menuPortal: (base) => ({ ...base, zIndex: 9999 }),
                         }}
                         menuPortalTarget={document.body}
                       />
+                      </Field>
                       {model === "__custom" && (
                         <input
                           className="form-control form-control-sm mt-2"
@@ -1092,16 +1191,19 @@ if (!user || !user.username) {
                     </div>
 
                     <div className="col-md-6">
+                      <Field label="IMEI Number" required>
                       <input
                         className="form-control form-control-sm"
-                        placeholder="IMEI *"
+                        placeholder="15-digit IMEI"
                         value={imei}
                         maxLength={15}
                         onChange={(e) => setImei(onlyNumbers(e.target.value))}
                       />
+                      </Field>
                     </div>
 
                     <div className="col-md-6">
+                      <Field label="Device Status">
                       <select
                         className="form-select form-select-sm"
                         value={mobileStatus}
@@ -1115,8 +1217,10 @@ if (!user || !user.username) {
                         <option value="Delivered NR/NA">Delivered NR/NA</option>
                         <option value="Cancelled">Cancelled</option>
                       </select>
+                      </Field>
                     </div>
                     <div className="col-md-6">
+                      <Field label="Warranty">
                       <select
                         className="form-select form-select-sm"
                         value={warranty}
@@ -1128,14 +1232,35 @@ if (!user || !user.username) {
                         <option value="6 months">6 Months</option>
                         <option value="1 year">1 Year</option>
                       </select>
+                      </Field>
                     </div>
                     <div className="col-md-6">
+                      <Field label="Pattern / PIN">
                       <input
                         className="form-control form-control-sm"
-                        placeholder="Pattern / PIN"
+                        placeholder="Pattern"
                         value={pattern}
                         onChange={(e) => setPattern(e.target.value)}
                       />
+                      </Field>
+                    </div>
+
+                    <div className="col-md-6">
+                      <Field label="ID Proof Image">
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="form-control form-control-sm"
+                        onChange={(e) => {
+                          const file = e.target.files[0];
+                          setIdProofImage(file);
+                          if (file) {
+                            setIdProofPreview(URL.createObjectURL(file));
+                          }
+                        }}
+                        disabled={idProofType === "ID Not Required" || idProofType === "Dealer Collected"}
+                      />
+                      </Field>
                     </div>
 
                   </div>
@@ -1145,226 +1270,259 @@ if (!user || !user.username) {
             </div>
             {/* ===== END: Customer Details + Device Details side by side ===== */}
 
-              <div className="card shadow-sm" style={{ borderRadius: 10, overflow: "hidden" }}>
-           <div className="card-header d-flex align-items-center gap-2" style={yellowHeader}>
-                  <Wrench size={16} /> Service / Repair Details
+              <div className="row g-2 align-items-start">
+
+                <div className="col-md-6">
+                  <div className="card shadow-sm" style={{ borderRadius: 10, overflow: "hidden" }}>
+                    <div className="card-header d-flex align-items-center gap-2" style={yellowHeader}>
+                      <Wrench size={16} /> Assignment &amp; Schedule
+                    </div>
+                    <div className="card-body row g-2" style={{ padding: "8px 12px" }}>
+
+                      <div className="col-md-6">
+                        <Field label="Engineer">
+                          <select
+                            className="form-select form-select-sm"
+                            value={engineer}
+                            onChange={e => setEngineer(e.target.value)}
+                          >
+                            <option value="">Select Engineer</option>
+                            {engineerList.map((eng, i) => {
+                              const name = eng.name || eng;
+                              return (
+                                <option key={i} value={name}>
+                                  🔧 {name}
+                                </option>
+                              );
+                            })}
+                          </select>
+                        </Field>
+                      </div>
+
+                      <div className="col-md-6">
+                        <Field label="Dealer Name">
+                          <input
+                            placeholder="Dealer "
+                            className="form-control form-control-sm"
+                            value={dealer}
+                            onChange={(e) => {
+                              const val = e.target.value.replace(/[^a-zA-Z\u0B80-\u0BFF\s.]/g, "");
+                              setDealer(val);
+                            }}
+                          />
+                        </Field>
+                      </div>
+
+                      <div className="col-md-6">
+                        <Field label="Drawer">
+                          <select
+                            className="form-select form-select-sm"
+                            value={drawer}
+                            onChange={(e) => setDrawer(e.target.value)}
+                          >
+                            <option value="">Select Drawer</option>
+                            {drawerList.map((d, i) => (
+                              <option key={i} value={d.name || d}>
+                                {d.name || d}
+                              </option>
+                            ))}
+                          </select>
+                        </Field>
+                      </div>
+
+                      <div className="col-md-6">
+                        <Field label="Service Rep">
+                          <select
+                            className="form-select form-select-sm"
+                            value={serviceRep}
+                            onChange={e => setServiceRep(e.target.value)}
+                          >
+                            <option value="">Service Rep</option>
+                            {salesRepList.map((rep, i) => (
+                              <option key={i} value={rep.name || rep}>
+                                {rep.name || rep}
+                              </option>
+                            ))}
+                          </select>
+                        </Field>
+                      </div>
+
+                      <div className="col-md-6">
+                        <Field label="Repair Date">
+                          <input
+                            type="date"
+                            className="form-control form-control-sm"
+                            value={repairDate}
+                            onChange={(e) => setRepairDate(e.target.value)}
+                          />
+                        </Field>
+                      </div>
+
+                      <div className="col-md-6">
+                        <Field label="Delivery Date">
+                          <input
+                            type="date"
+                            className="form-control form-control-sm"
+                            value={deliveryDate}
+                            onChange={(e) => setDeliveryDate(e.target.value)}
+                          />
+                        </Field>
+                      </div>
+
+                      <div className="col-md-6">
+                        <Field label="Insta Follow">
+                          <select
+                            className="form-select form-select-sm"
+                            value={instaFollowers}
+                            onChange={(e) => setInstaFollowers(e.target.value)}
+                          >
+                            <option value="">Insta </option>
+                            <option value="Yes">Yes</option>
+                            <option value="No">No</option>
+                            <option value="Already Done">Already Done</option>
+                          </select>
+                        </Field>
+                      </div>
+
+                      <div className="col-md-6">
+                        <Field label="Google Review">
+                          <select
+                            className="form-select form-select-sm"
+                            value={googleReview}
+                            onChange={(e) => setGoogleReview(e.target.value)}
+                          >
+                            <option value="">Google </option>
+                            <option value="Yes">Yes</option>
+                            <option value="No">No</option>
+                            <option value="Already Done">Already Done</option>
+                          </select>
+                        </Field>
+                      </div>
+
+                    </div>
+                  </div>
                 </div>
 
-                <div className="card-body" style={{ padding: "8px 12px" }}>
+                <div className="col-md-6">
+                  <div className="card shadow-sm" style={{ borderRadius: 10, overflow: "hidden" }}>
+                    <div className="card-header d-flex align-items-center gap-2" style={yellowHeader}>
+                      <Wallet size={16} /> Billing &amp; Charges
+                    </div>
+                    <div className="card-body row g-2" style={{ padding: "8px 12px" }}>
 
-                  <div className="row g-2">
-
-                      <div className="col-md-3">
-                       <select
-  className="form-select form-select-sm"
-  value={engineer}
-  onChange={e => setEngineer(e.target.value)}
->
-  <option value="">Select Engineer</option>
-  {engineerList.map((eng, i) => {
-    const name = eng.name || eng;
-    return (
-      <option key={i} value={name}>
-        🔧 {name}
-      </option>
-    );
-  })}
-</select>
+                      <div className="col-md-6">
+                        <Field label="Income ₹">
+                          <input
+                            className="form-control form-control-sm"
+                            placeholder="0"
+                            value={income}
+                            onChange={(e) => setIncome(onlyNumbers(e.target.value))}
+                          />
+                        </Field>
+                        {/* ✅ NEW — shows the date this income was recorded (used by Income Report) */}
+                        {incomeDate && (
+                          <div style={{ fontSize: 10, color: "#0d6efd", marginTop: 2, fontWeight: 500 }}>
+                            📅 Income recorded on {incomeDate}
+                          </div>
+                        )}
                       </div>
 
-                      <div className="col-md-3">
-                        <input
-                          placeholder="Dealer Name"
-                          className="form-control form-control-sm"
-                          value={dealer}
-                          onChange={(e) => {
-                            const val = e.target.value.replace(/[^a-zA-Z\u0B80-\u0BFF\s.]/g, "");
-                            setDealer(val);
-                          }}
-                        />
+                      <div className="col-md-6">
+                        <Field label="Service Charges ">
+                          <input
+                            type="text"
+                            className="form-control form-control-sm"
+                            placeholder="0"
+                            value={serviceCharge}
+                            readOnly
+                            style={{ background: "#f8f9fa", cursor: "not-allowed" }}
+                          />
+                        </Field>
                       </div>
 
-                      <div className="col-md-3">
-                        <select
-                          className="form-select form-select-sm"
-                          value={drawer}
-                          onChange={(e) => setDrawer(e.target.value)}
-                        >
-                          <option value="">Select Drawer</option>
-                          {drawerList.map((d, i) => (
-                            <option key={i} value={d.name || d}>
-                              {d.name || d}
-                            </option>
-                          ))}
-                        </select>
+                      <div className="col-md-6">
+                        <Field label="Spare Charges ">
+                          <input
+                            type="text"
+                            className="form-control form-control-sm"
+                            placeholder="Tap to add "
+                            value={spareCharge}
+                            readOnly
+                            onClick={() => setSparePopup(true)}
+                            style={{ cursor: "pointer", background: "#f8f9fa" }}
+                          />
+                        </Field>
                       </div>
 
-                      <div className="col-md-3">
-                        <select
-                          className="form-select form-select-sm"
-                          value={serviceRep}
-                          onChange={e => setServiceRep(e.target.value)}
-                        >
-                          <option value="">Service Rep</option>
-                          {salesRepList.map((rep, i) => (
-                            <option key={i} value={rep.name || rep}>
-                              {rep.name || rep}
-                            </option>
-                          ))}
-                        </select>
+                      <div className="col-md-6">
+                        <Field label="Other Expenses">
+                          <input
+                            type="text"
+                            className="form-control form-control-sm"
+                            placeholder="Tap to add"
+                            value={othersAmount}
+                            readOnly
+                            onClick={() => setShowOthersPopup(true)}
+                            style={{ cursor: "pointer", background: "#f8f9fa" }}
+                          />
+                        </Field>
+                        {othersItems.length > 0 && (
+                          <div style={{ fontSize: 10, color: "#6c757d", marginTop: 2, fontWeight: 500, display: "flex", alignItems: "center", gap: 4 }}>
+                            <Package size={11} /> {othersItems.length} expense{othersItems.length > 1 ? "s" : ""}
+                          </div>
+                        )}
                       </div>
 
+                      <div className="col-md-6">
+                        <Field label="Advance Amount ">
+                          <input
+                            type="text"
+                            className="form-control form-control-sm"
+                            placeholder="Tap to add"
+                            value={advanceAmount}
+                            readOnly
+                            onClick={() => setShowAdvancePopup(true)}
+                            style={{ cursor: "pointer", background: "#f8f9fa" }}
+                          />
+                        </Field>
+                        {advanceItems.length > 0 && (
+                          <div style={{ fontSize: 10, color: "#0d6efd", marginTop: 2, fontWeight: 500, display: "flex", alignItems: "center", gap: 4 }}>
+                            <Wallet size={11} /> {advanceItems.length} payment{advanceItems.length > 1 ? "s" : ""}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="col-md-6">
+                        <Field label="Payment Mode">
+                          <select
+                            className="form-select form-select-sm"
+                            value={paymentMode}
+                            onChange={(e) => setPaymentMode(e.target.value)}
+                          >
+                            <option>Payment Mode</option>
+                            <option>Cash</option>
+                            <option>UPI</option>
+                            <option>Card</option>
+                          </select>
+                        </Field>
+                      </div>
+
+                      <div className="col-md-12">
+                        <Field label="Remarks">
+                          <textarea
+                            className="form-control form-control-sm"
+                            placeholder="Any additional notes"
+                            value={remarks}
+                            onChange={(e) => setRemarks(e.target.value)}
+                            style={{ height: "31px", resize: "none" }}
+                          />
+                        </Field>
+                      </div>
+
+                    </div>
                   </div>
-
-                  <div className="row g-2 mt-1">
-                    <div className="col-md-3">
-                      <input
-                        className="form-control form-control-sm"
-                        placeholder="Income ₹"
-                        value={income}
-                        onChange={(e) => setIncome(onlyNumbers(e.target.value))}
-                      />
-                    </div>
-
-                    <div className="col-md-3">
-                      <input
-                        type="text"
-                        className="form-control form-control-sm"
-                        placeholder="Spare Charges"
-                        value={spareCharge}
-                        readOnly
-                        onClick={() => setSparePopup(true)}
-                        style={{ cursor: "pointer", background: "#f8f9fa" }}
-                      />
-                    </div>
-
-                    <div className="col-md-3">
-                      <input
-                        type="text"
-                        className="form-control form-control-sm"
-                        placeholder="Others ₹"
-                        value={othersAmount}
-                        readOnly
-                        onClick={() => setShowOthersPopup(true)}
-                        style={{ cursor: "pointer", background: "#f8f9fa" }}
-                      />
-                      {othersItems.length > 0 && (
-                        <div style={{ fontSize: 10, color: "#6c757d", marginTop: 2, fontWeight: 500, display: "flex", alignItems: "center", gap: 4 }}>
-                          <Package size={11} /> {othersItems.length} expense{othersItems.length > 1 ? "s" : ""}
-                        </div>
-                      )}
-                    </div>
-                    <div className="col-md-3">
-                      <input
-                        type="text"
-                        className="form-control form-control-sm"
-                        placeholder="Service Charges"
-                        value={serviceCharge}
-                        onChange={(e) => setServiceCharge(onlyNumbers(e.target.value))}
-                        min="0"
-                      />
-                    </div>
-
-                  </div>
-
-           <div className="row g-2 mt-1 align-items-start">
-
-                    <div className="col-md-3">
-                      <input
-                        type="text"
-                        className="form-control form-control-sm"
-                        placeholder="Adv. Amount ₹"
-                        value={advanceAmount}
-                        readOnly
-                        onClick={() => setShowAdvancePopup(true)}
-                        style={{ cursor: "pointer", background: "#f8f9fa" }}
-                      />
-                      {advanceItems.length > 0 && (
-                        <div style={{ fontSize: 10, color: "#0d6efd", marginTop: 2, fontWeight: 500, display: "flex", alignItems: "center", gap: 4 }}>
-                          <Wallet size={11} /> {advanceItems.length} payment{advanceItems.length > 1 ? "s" : ""}
-                        </div>
-                      )}
-                    </div>
-                    <div className="col-md-3">
-                      <select
-                        className="form-select form-select-sm"
-                        value={paymentMode}
-                        onChange={(e) => setPaymentMode(e.target.value)}
-                      >
-                        <option>Payment Mode</option>
-                        <option>Cash</option>
-                        <option>UPI</option>
-                        <option>Card</option>
-                      </select>
-                    </div>
-
-                    <div className="col-md-3">
-                      {/* <label className="form-label small fw-semibold mb-1 d-flex align-items-center gap-1">
-                        <Instagram size={13} /> Insta Follow
-                      </label> */}
-                      <select
-                        className="form-select form-select-sm"
-                        value={instaFollowers}
-                        onChange={(e) => setInstaFollowers(e.target.value)}
-                      >
-                        <option value="">Insta Follow</option>
-                        <option value="Yes">Yes</option>
-                        <option value="No">No</option>
-                        <option value="Already Done">Already Done</option>
-                      </select>
-                    </div>
-
-                    <div className="col-md-3">
-                      {/* <label className="form-label small fw-semibold mb-1 d-flex align-items-center gap-1">
-                        <Star size={13} /> Google Review
-                      </label> */}
-                      <select
-                        className="form-select form-select-sm"
-                        value={googleReview}
-                        onChange={(e) => setGoogleReview(e.target.value)}
-                      >
-                        <option value="">Google Review</option>
-                        <option value="Yes">Yes</option>
-                        <option value="No">No</option>
-                        <option value="Already Done">Already Done</option>
-                      </select>
-                    </div>
-
-                  </div>
-
-                 <div className="row g-2 mt-1">
-                    <div className="col-md-3">
-                      <label className="form-label small fw-semibold mb-1">Repair Date</label>
-                      <input
-                        type="date"
-                        className="form-control form-control-sm"
-                        value={repairDate}
-                        onChange={(e) => setRepairDate(e.target.value)}
-                      />
-                    </div>
-                   <div className="col-md-3">
-  <label className="form-label small fw-semibold mb-1">Delivery Date</label>
-  <input
-    type="date"
-    className="form-control form-control-sm"
-    value={deliveryDate}
-    onChange={(e) => setDeliveryDate(e.target.value)}
-  />
-</div>
-<div className="col-md-6">
-  <label className="form-label small fw-semibold mb-1">Remarks</label>
-  <textarea
-    className="form-control form-control-sm"
-    placeholder="Remarks"
-    value={remarks}
-    onChange={(e) => setRemarks(e.target.value)}
-    style={{ height: "31px", resize: "none" }}
-  />
-</div>
-                  </div>
-
-
                 </div>
+
               </div>
             </div>
 
@@ -1379,6 +1537,7 @@ if (!user || !user.username) {
 
                   {visualIssues.map((issue, i) => (
                     <div className="mb-2" key={i}>
+                      <Field label={`Issue ${visualIssues.length > 1 ? `#${i + 1}` : ""}`}>
                       <Select
                         options={[
                           ...faultList.map(f => ({ label: f.name, value: f.name })),
@@ -1412,6 +1571,7 @@ if (!user || !user.username) {
                           menuPortal: (base) => ({ ...base, zIndex: 9999 }),
                         }}
                       />
+                      </Field>
                       {customFaults[i] !== undefined && (
                         <input
                           className="form-control form-control-sm mt-2"
@@ -1459,6 +1619,7 @@ if (!user || !user.username) {
                   <Bandage size={16} /> Physical Condition
                 </div>
                 <div className="card-body small" style={{ padding: "8px 12px" }}>
+                  <Field label="Condition(s) Observed">
                   <Select
                     isMulti
                     options={physicalConditionOptions}
@@ -1472,6 +1633,7 @@ if (!user || !user.username) {
                       menuPortal: (base) => ({ ...base, zIndex: 9999 }),
                     }}
                   />
+                  </Field>
                   {physicalCondition.includes("Others") && (
                     <input className="form-control form-control-sm mt-2" placeholder="Other Details" />
                   )}
@@ -1484,6 +1646,7 @@ if (!user || !user.username) {
                   <Gift size={16} /> Accessories Received
                 </div>
                 <div className="card-body small" style={{ padding: "8px 12px" }}>
+                  <Field label="Items Received">
                   <Select
                     isMulti
                     options={accessoriesOptions}
@@ -1497,6 +1660,7 @@ if (!user || !user.username) {
                       menuPortal: (base) => ({ ...base, zIndex: 9999 }),
                     }}
                   />
+                  </Field>
                   {accessories.includes("Others") && (
                     <input className="form-control form-control-sm mt-2" placeholder="Battery Number" />
                   )}
@@ -1706,6 +1870,8 @@ if (!user || !user.username) {
             </button>
           )}
         </div>
+      </div>
+
       </div>
     
   );

@@ -21,37 +21,34 @@ const IncomeReportPage = () => {
 
   useEffect(() => { fetchReport(); }, []);
 
+  /* ✅ Groups income by `incomeDate` — the date Income was actually entered/updated
+     and saved (see JobSheetPage.jsx). This is NOT repairDate, so a job created in
+     July but whose Income was entered in August will correctly show up in August. */
   const processData = (jobsheets) => {
     const grouped = {};
     let gTotal = 0;
 
     jobsheets.forEach((item) => {
-      const jobSheetNo = item.jobSheetNo;
-      const name       = item.customer?.name || "";
-      const repairDate = item.service?.repairDate?.slice(0, 10) || "";
-      const revenueEntries = item.service?.revenueEntries || [];
+      const amt = Number(item.service?.income || 0);
+      if (amt <= 0) return;
 
-      let entries = [];
-      if (revenueEntries.length > 0) {
-        revenueEntries.forEach((e) => {
-          const amt = Number(e.income || 0);
-          if (amt > 0) {
-            const d = e.date ? new Date(e.date).toISOString().slice(0, 10) : repairDate;
-            entries.push({ date: d, amount: amt });
-          }
-        });
-      } else {
-        const amt = Number(item.service?.income || 0);
-        if (amt > 0) entries.push({ date: repairDate, amount: amt });
-      }
+      // fallback to repairDate only if incomeDate was never set (old records before this fix)
+      const rawDate = item.service?.incomeDate || item.service?.repairDate;
+      if (!rawDate) return;
 
-      entries.forEach((e) => {
-        if (fromDate && e.date < fromDate) return;
-        if (toDate && e.date > toDate) return;
-        if (!grouped[e.date]) grouped[e.date] = [];
-        grouped[e.date].push({ jobSheetNo, name, amount: e.amount });
-        gTotal += e.amount;
+      const date = new Date(rawDate).toISOString().slice(0, 10);
+
+      if (fromDate && date < fromDate) return;
+      if (toDate && date > toDate) return;
+
+      if (!grouped[date]) grouped[date] = [];
+      grouped[date].push({
+        jobSheetNo: item.jobSheetNo,
+        name: item.customer?.name || "",
+        engineer: item.service?.engineer || "-",
+        amount: amt,
       });
+      gTotal += amt;
     });
 
     const sorted = {};
@@ -66,7 +63,14 @@ const IncomeReportPage = () => {
     const rows = [];
     Object.entries(groupedData).forEach(([date, records]) => {
       records.forEach((item, i) => {
-        rows.push({ "Date": date, "SL No": i + 1, "Job Sheet": item.jobSheetNo, "Customer": item.name, "Amount": item.amount });
+        rows.push({
+          "Date": date,
+          "SL No": i + 1,
+          "Job Sheet": item.jobSheetNo,
+          "Customer": item.name,
+          "Engineer": item.engineer,
+          "Income Amount": item.amount,
+        });
       });
     });
     const ws = XLSX.utils.json_to_sheet(rows);
@@ -78,8 +82,8 @@ const IncomeReportPage = () => {
   return (
     <div className="min-h-screen bg-gray-100 p-6">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold">💵 Income Value Report</h1>
-        <p className="text-sm text-gray-500">Date-wise income entries</p>
+        <h1 className="text-2xl font-bold">💵 Income Report</h1>
+        <p className="text-sm text-gray-500">Date-wise income (grouped by the date income was recorded)</p>
       </div>
 
       <div className="bg-white p-5 rounded-xl shadow mb-6 flex flex-wrap gap-4 items-end print:hidden">
@@ -104,36 +108,47 @@ const IncomeReportPage = () => {
               <th className="border p-3">SL</th>
               <th className="border p-3">JobSheet</th>
               <th className="border p-3">Customer</th>
-              <th className="border p-3">Amount</th>
+              <th className="border p-3">Engineer</th>
+              <th className="border p-3">Income Amount</th>
             </tr>
           </thead>
           <tbody>
+            {Object.keys(groupedData).length === 0 && (
+              <tr>
+                <td colSpan="5" className="text-center p-6 text-gray-400">No Data Found</td>
+              </tr>
+            )}
+
             {Object.entries(groupedData).map(([date, records], idx) => {
               const subTotal = records.reduce((sum, r) => sum + Number(r.amount), 0);
               return (
                 <React.Fragment key={idx}>
                   <tr className="bg-blue-50 font-semibold">
-                    <td colSpan="4" className="p-3 border">📅 {date}</td>
+                    <td colSpan="5" className="p-3 border">📅 {date}</td>
                   </tr>
                   {records.map((item, i) => (
                     <tr key={i}>
                       <td className="border p-2">{i + 1}</td>
                       <td className="border p-2">{item.jobSheetNo}</td>
                       <td className="border p-2">{item.name}</td>
+                      <td className="border p-2">{item.engineer}</td>
                       <td className="border p-2 font-semibold">₹ {item.amount}</td>
                     </tr>
                   ))}
                   <tr className="bg-gray-100 font-semibold">
-                    <td colSpan="3" className="text-right p-2 border">Sub Total</td>
+                    <td colSpan="4" className="text-right p-2 border">Sub Total</td>
                     <td className="p-2 border">₹ {subTotal}</td>
                   </tr>
                 </React.Fragment>
               );
             })}
-            <tr className="bg-green-100 font-bold text-lg">
-              <td colSpan="3" className="text-right p-3 border">Grand Total</td>
-              <td className="p-3 border">₹ {grandTotal}</td>
-            </tr>
+
+            {Object.keys(groupedData).length > 0 && (
+              <tr className="bg-green-100 font-bold text-lg">
+                <td colSpan="4" className="text-right p-3 border">Grand Total</td>
+                <td className="p-3 border">₹ {grandTotal}</td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
