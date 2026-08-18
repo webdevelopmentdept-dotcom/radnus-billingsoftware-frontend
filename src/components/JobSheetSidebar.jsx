@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ChevronDown, LayoutList, Users, Database, FileBarChart, LogOut, Menu, X
@@ -34,8 +34,28 @@ const JobSheetSidebar = () => {
   const user = JSON.parse(sessionStorage.getItem("user") || "{}");
   const role = user?.role;
 
-  // Sidebar starts CLOSED (icons only). Clicking the 3-line icon animates it open.
+  // Sidebar starts CLOSED (icons only). Hovering over it opens it automatically;
+  // moving the mouse away closes it again — no click needed (see hover handlers below).
   const [isOpen, setIsOpen] = useState(false);
+
+  // ✅ small close-delay so quick mouse movement (e.g. hovering the sidebar then
+  // immediately clicking a nav item that navigates away) doesn't cause a jarring
+  // instant-collapse flicker — the sidebar eases shut a beat after the mouse leaves.
+  const closeTimer = useRef(null);
+  const openSidebar = () => {
+    if (closeTimer.current) {
+      clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+    setIsOpen(true);
+  };
+  const closeSidebarDelayed = () => {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    closeTimer.current = setTimeout(() => {
+      setIsOpen(false);
+      closeTimer.current = null;
+    }, 150);
+  };
 
   const [adminOpen, setAdminOpen] = useState(false);
   const [dataOpen, setDataOpen] = useState(false);
@@ -79,12 +99,14 @@ const JobSheetSidebar = () => {
     </span>
   );
 
-  // When collapsed, clicking a group header opens the sidebar and its submenu.
-  // When already open, hovering the group reveals the submenu (no click needed).
+  // Group submenus (Admin Operation / Data Operation) reveal on hover once the
+  // sidebar itself is open — clicking still works as a fallback on touch devices.
   const handleGroupClick = (setter) => {
     if (!isOpen) {
-      setIsOpen(true);
+      openSidebar();
       setter(true);
+    } else {
+      setter(prev => !prev);
     }
   };
 
@@ -103,7 +125,7 @@ const JobSheetSidebar = () => {
           gap: 12,
         }}
       >
-        {/* 3-line toggle */}
+        {/* 3-line icon — hovering this (or anywhere in the sidebar) opens it */}
         <div
           style={{
             display: "flex",
@@ -111,7 +133,7 @@ const JobSheetSidebar = () => {
           }}
         >
           <button
-            onClick={() => setIsOpen(!isOpen)}
+            onClick={() => (isOpen ? setIsOpen(false) : openSidebar())}
             aria-label={isOpen ? "Collapse sidebar" : "Expand sidebar"}
             style={{
               background: "rgba(255,255,255,0.06)",
@@ -282,16 +304,21 @@ const JobSheetSidebar = () => {
 
   return (
     <>
-      {/* Desktop Sidebar — collapsed (icons only) by default, animates open on toggle */}
+      {/* Desktop Sidebar — collapsed (icons only) by default.
+          Hovering anywhere over it opens it; moving the mouse away closes it
+          again after a short delay (see closeSidebarDelayed) to avoid jarring
+          flicker when navigating to a new page. */}
       <div
         className="d-none d-md-flex"
+        onMouseEnter={openSidebar}
+        onMouseLeave={closeSidebarDelayed}
         style={{
           width: isOpen ? EXPANDED_W : COLLAPSED_W,
           minWidth: isOpen ? EXPANDED_W : COLLAPSED_W,
           minHeight: "100vh", background: "#0f172a",
           flexDirection: "column", position: "sticky", top: 0, alignSelf: "flex-start",
           borderRight: "1px solid rgba(255,255,255,0.06)", zIndex: 20,
-          transition: "width 0.38s cubic-bezier(0.22, 1, 0.36, 1), min-width 0.38s cubic-bezier(0.22, 1, 0.36, 1)",
+          transition: "width 0.3s cubic-bezier(0.22, 1, 0.36, 1), min-width 0.3s cubic-bezier(0.22, 1, 0.36, 1)",
           overflow: "hidden",
           willChange: "width",
         }}

@@ -132,16 +132,6 @@ const selectCompactText = {
   }),
 };
 
-/* ================= SELECT OPTIONS (NEW — for Physical Condition & Accessories) ================= */
-const physicalConditionOptions = [
-  "Colour Faded", "Antenna Broken", "Deformed", "Battery Damaged",
-  "LCD Broken / Bleeding", "Tampered Set", "Front Cover Scratches",
-  "Scratches On Body", "Water Logged", "Others"
-].map(x => ({ label: x, value: x }));
-
-const accessoriesOptions = ["Battery", "Charger", "Back Cover", "Memory Card", "SIM", "Others"]
-  .map(x => ({ label: x, value: x }));
-
 const JobSheetPage = ({ editData = null, isEdit = false }) => {
   const [makeList, setMakeList] = useState([]);
   const [modelList, setModelList] = useState([]);
@@ -292,6 +282,89 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
   const [accessories, setAccessories] = useState([]);
   const [visualIssues, setVisualIssues] = useState([""]);
   const [faultList, setFaultList] = useState([]);
+
+  /* ================= PHYSICAL CONDITION / ACCESSORIES — now backend-driven (NEW) =================
+     Master lists live in Mongo (PhysicalCondition / Accessory collections) instead of being
+     hardcoded here. Picking "Others (Add New)" and typing a name POSTs it to the backend so
+     it appears in the dropdown for every future job sheet, not just this one. */
+  const [physicalConditionList, setPhysicalConditionList] = useState([]);
+  const [accessoryList, setAccessoryList] = useState([]);
+  const [customPhysicalConditionText, setCustomPhysicalConditionText] = useState("");
+  const [customAccessoryText, setCustomAccessoryText] = useState("");
+  const [addingPhysicalCondition, setAddingPhysicalCondition] = useState(false);
+  const [addingAccessory, setAddingAccessory] = useState(false);
+
+  const fetchPhysicalConditions = () => {
+    axios.get(`${API}/api/physical-conditions`)
+      .then(res => setPhysicalConditionList(res.data))
+      .catch(err => console.error("Physical condition fetch error:", err));
+  };
+  const fetchAccessories = () => {
+    axios.get(`${API}/api/accessories`)
+      .then(res => setAccessoryList(res.data))
+      .catch(err => console.error("Accessory fetch error:", err));
+  };
+
+  useEffect(() => {
+    fetchPhysicalConditions();
+    fetchAccessories();
+  }, []);
+
+  const physicalConditionOptions = [
+    ...physicalConditionList.map(x => ({ label: x.name, value: x.name })),
+    { label: "Others (Add New)", value: "__custom" },
+  ];
+  const accessoriesOptions = [
+    ...accessoryList.map(x => ({ label: x.name, value: x.name })),
+    { label: "Others (Add New)", value: "__custom" },
+  ];
+
+  const handleAddCustomPhysicalCondition = async () => {
+    const val = customPhysicalConditionText.trim();
+    if (!val) return;
+    setAddingPhysicalCondition(true);
+    try {
+      const res = await axios.post(`${API}/api/physical-conditions`, { name: val });
+      setPhysicalConditionList(prev => {
+        const exists = prev.some(p => p.name.toLowerCase() === res.data.name.toLowerCase());
+        return exists ? prev : [res.data, ...prev];
+      });
+      // Swap the placeholder "__custom" marker out for the real saved name
+      setPhysicalCondition(prev => {
+        const withoutMarker = prev.filter(v => v !== "__custom");
+        return withoutMarker.includes(res.data.name) ? withoutMarker : [...withoutMarker, res.data.name];
+      });
+      setCustomPhysicalConditionText("");
+    } catch (err) {
+      console.error(err);
+      alert("Failed to add physical condition ❌");
+    } finally {
+      setAddingPhysicalCondition(false);
+    }
+  };
+
+  const handleAddCustomAccessory = async () => {
+    const val = customAccessoryText.trim();
+    if (!val) return;
+    setAddingAccessory(true);
+    try {
+      const res = await axios.post(`${API}/api/accessories`, { name: val });
+      setAccessoryList(prev => {
+        const exists = prev.some(a => a.name.toLowerCase() === res.data.name.toLowerCase());
+        return exists ? prev : [res.data, ...prev];
+      });
+      setAccessories(prev => {
+        const withoutMarker = prev.filter(v => v !== "__custom");
+        return withoutMarker.includes(res.data.name) ? withoutMarker : [...withoutMarker, res.data.name];
+      });
+      setCustomAccessoryText("");
+    } catch (err) {
+      console.error(err);
+      alert("Failed to add accessory ❌");
+    } finally {
+      setAddingAccessory(false);
+    }
+  };
 
   useEffect(() => {
     axios.get(`${API}/api/faults`)
@@ -460,8 +533,8 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
       formData.append("jobSheetNo", jobSheetNo);
       formData.append("customer", JSON.stringify({ name: customerName, contact, altContact, address, email }));
       formData.append("device", JSON.stringify({ make: make === "__custom" ? customMake : make, model: model === "__custom" ? customModel : model, imei, warranty, pattern, mobileStatus }));
-      formData.append("physicalCondition", JSON.stringify(physicalCondition));
-      formData.append("accessories", JSON.stringify(accessories));
+      formData.append("physicalCondition", JSON.stringify(physicalCondition.filter(v => v !== "__custom")));
+      formData.append("accessories", JSON.stringify(accessories.filter(v => v !== "__custom")));
       formData.append("advanceItems", JSON.stringify(advanceItems));
       formData.append("visualIssues", JSON.stringify(visualIssues.filter(Boolean)));
       formData.append("service", JSON.stringify({
@@ -547,8 +620,8 @@ if (!user || !user.username) {
       formData.append("jobSheetNo", jobSheetNo);
       formData.append("customer", JSON.stringify({ name: customerName, contact, altContact, address, email }));
       formData.append("device", JSON.stringify({ make: make === "__custom" ? customMake : make, model: model === "__custom" ? customModel : model, imei, warranty, pattern, mobileStatus }));
-      formData.append("physicalCondition", JSON.stringify(physicalCondition));
-      formData.append("accessories", JSON.stringify(accessories));
+      formData.append("physicalCondition", JSON.stringify(physicalCondition.filter(v => v !== "__custom")));
+      formData.append("accessories", JSON.stringify(accessories.filter(v => v !== "__custom")));
       formData.append("advanceItems", JSON.stringify(advanceItems));
       formData.append("visualIssues", JSON.stringify(visualIssues.filter(Boolean)));
       formData.append("service", JSON.stringify({
@@ -615,6 +688,8 @@ if (!user || !user.username) {
     setGoogleReview("");
     setPhysicalCondition([]);
     setAccessories([]);
+    setCustomPhysicalConditionText("");
+    setCustomAccessoryText("");
     setVisualIssues([""]);
     setCustomFaults({});
     setAdvanceDate("");
@@ -1537,7 +1612,7 @@ if (!user || !user.username) {
 
                   {visualIssues.map((issue, i) => (
                     <div className="mb-2" key={i}>
-                      <Field label={`Issue ${visualIssues.length > 1 ? `#${i + 1}` : ""}`}>
+                     
                       <Select
                         options={[
                           ...faultList.map(f => ({ label: f.name, value: f.name })),
@@ -1571,7 +1646,7 @@ if (!user || !user.username) {
                           menuPortal: (base) => ({ ...base, zIndex: 9999 }),
                         }}
                       />
-                      </Field>
+                     
                       {customFaults[i] !== undefined && (
                         <input
                           className="form-control form-control-sm mt-2"
@@ -1602,30 +1677,30 @@ if (!user || !user.username) {
                     </div>
                   ))}
 
-                  <button
+                  {/* <button
                     className="btn btn-sm w-100"
                     style={{ background: RED_SOFT_BG, color: RED_TEXT, border: `1px solid ${RED_BORDER}`, fontWeight: 600 }}
                     onClick={addIssue}
                   >
                     <Plus size={14} /> Add Issue
-                  </button>
+                  </button> */}
 
                 </div>
               </div>
 
-              {/* PHYSICAL CONDITION — now a multi-select (NEW) */}
+              {/* PHYSICAL CONDITION — multi-select, backend-driven (UPDATED) */}
              <div className="card shadow-sm mb-2" style={{ borderRadius: 10, overflow: "hidden" }}>
                 <div className="card-header d-flex align-items-center gap-2" style={redHeader}>
                   <Bandage size={16} /> Physical Condition
                 </div>
                 <div className="card-body small" style={{ padding: "8px 12px" }}>
-                  <Field label="Condition(s) Observed">
+           
                   <Select
                     isMulti
                     options={physicalConditionOptions}
                     value={physicalConditionOptions.filter(o => physicalCondition.includes(o.value))}
                     onChange={(selected) => setPhysicalCondition(selected ? selected.map(s => s.value) : [])}
-                    placeholder="Select Physical Condition..."
+                    placeholder="Select Physical"
                     isClearable
                     menuPortalTarget={document.body}
                     styles={{
@@ -1633,20 +1708,37 @@ if (!user || !user.username) {
                       menuPortal: (base) => ({ ...base, zIndex: 9999 }),
                     }}
                   />
-                  </Field>
-                  {physicalCondition.includes("Others") && (
-                    <input className="form-control form-control-sm mt-2" placeholder="Other Details" />
+                  
+                  {physicalCondition.includes("__custom") && (
+                    <div className="d-flex gap-1 mt-2">
+                      <input
+                        className="form-control form-control-sm"
+                        placeholder="Type new condition"
+                        value={customPhysicalConditionText}
+                        onChange={(e) => setCustomPhysicalConditionText(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAddCustomPhysicalCondition(); } }}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        style={{ background: RED, color: "#fff", fontWeight: 600, whiteSpace: "nowrap" }}
+                        disabled={addingPhysicalCondition || !customPhysicalConditionText.trim()}
+                        onClick={handleAddCustomPhysicalCondition}
+                      >
+                        {addingPhysicalCondition ? "..." : "Add"}
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>
 
-              {/* ACCESSORIES — now a multi-select (NEW) */}
+              {/* ACCESSORIES — multi-select, backend-driven (UPDATED) */}
               <div className="card shadow-sm" style={{ borderRadius: 10, overflow: "hidden" }}>
                 <div className="card-header d-flex align-items-center gap-2" style={redHeader}>
                   <Gift size={16} /> Accessories Received
                 </div>
                 <div className="card-body small" style={{ padding: "8px 12px" }}>
-                  <Field label="Items Received">
+                  
                   <Select
                     isMulti
                     options={accessoriesOptions}
@@ -1660,9 +1752,26 @@ if (!user || !user.username) {
                       menuPortal: (base) => ({ ...base, zIndex: 9999 }),
                     }}
                   />
-                  </Field>
-                  {accessories.includes("Others") && (
-                    <input className="form-control form-control-sm mt-2" placeholder="Battery Number" />
+               
+                  {accessories.includes("__custom") && (
+                    <div className="d-flex gap-1 mt-2">
+                      <input
+                        className="form-control form-control-sm"
+                        placeholder="Type new accessory"
+                        value={customAccessoryText}
+                        onChange={(e) => setCustomAccessoryText(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAddCustomAccessory(); } }}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        style={{ background: RED, color: "#fff", fontWeight: 600, whiteSpace: "nowrap" }}
+                        disabled={addingAccessory || !customAccessoryText.trim()}
+                        onClick={handleAddCustomAccessory}
+                      >
+                        {addingAccessory ? "..." : "Add"}
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>
