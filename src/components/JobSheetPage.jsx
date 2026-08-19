@@ -294,6 +294,16 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
   const [addingPhysicalCondition, setAddingPhysicalCondition] = useState(false);
   const [addingAccessory, setAddingAccessory] = useState(false);
 
+  /* ================= MAKE / MODEL / FAULT — Add-New now backend-driven too (NEW) =================
+     Same problem as Physical Condition/Accessories used to have: typing a new Make, Model, or
+     Visual Issue (Fault) only saved it on THIS job sheet's own fields — nothing was POSTed to
+     /api/makes, /api/models, or /api/faults, so the master dropdown list never grew and the
+     next job sheet's search couldn't find it. These three "adding" flags + handlers below fix
+     that by POSTing exactly like Physical Condition/Accessories already do. */
+  const [addingMake, setAddingMake] = useState(false);
+  const [addingModel, setAddingModel] = useState(false);
+  const [addingFault, setAddingFault] = useState({}); // keyed by visualIssues index
+
   const fetchPhysicalConditions = () => {
     axios.get(`${API}/api/physical-conditions`)
       .then(res => setPhysicalConditionList(res.data))
@@ -363,6 +373,91 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
       alert("Failed to add accessory ❌");
     } finally {
       setAddingAccessory(false);
+    }
+  };
+
+  /* ================= ADD NEW MAKE (NEW) =================
+     Mirrors handleAddCustomPhysicalCondition — POSTs to /api/makes (makeRoutes.js already
+     supports this), pushes the new Make into makeList so the Select dropdown has it right
+     away, and switches `make` from "__custom" to the real saved name. */
+  const handleAddCustomMake = async () => {
+    const val = customMake.trim();
+    if (!val) return;
+    setAddingMake(true);
+    try {
+      const res = await axios.post(`${API}/api/makes`, { name: val });
+      const newMakeObj = res.data.data || res.data;
+      setMakeList(prev => {
+        const exists = prev.some(m => (m.name || m).toLowerCase() === newMakeObj.name.toLowerCase());
+        return exists ? prev : [newMakeObj, ...prev];
+      });
+      setMake(newMakeObj.name);
+      setCustomMake("");
+    } catch (err) {
+      console.error(err);
+      alert(err.response?.data?.message || "Failed to add make ❌");
+    } finally {
+      setAddingMake(false);
+    }
+  };
+
+  /* ================= ADD NEW MODEL (NEW) =================
+     Mirrors handleAddCustomMake — POSTs to /api/models with { name, make }, since modelRoutes.js
+     requires both fields. Uses whichever Make is currently selected (or the just-typed custom
+     Make) so the new Model is correctly linked. */
+  const handleAddCustomModel = async () => {
+    const val = customModel.trim();
+    if (!val) return;
+    const selectedMake = make === "__custom" ? customMake : make;
+    if (!selectedMake) {
+      alert("⚠️ Select or Add a Make first");
+      return;
+    }
+    setAddingModel(true);
+    try {
+      const res = await axios.post(`${API}/api/models`, { name: val, make: selectedMake });
+      const newModelObj = res.data.data || res.data;
+      setModelList(prev => {
+        const exists = prev.some(m => (m.name || m).toLowerCase() === newModelObj.name.toLowerCase());
+        return exists ? prev : [newModelObj, ...prev];
+      });
+      setModel(newModelObj.name);
+      setCustomModel("");
+    } catch (err) {
+      console.error(err);
+      alert(err.response?.data?.message || "Failed to add model ❌");
+    } finally {
+      setAddingModel(false);
+    }
+  };
+
+  /* ================= ADD NEW FAULT / VISUAL ISSUE (NEW) =================
+     Mirrors handleAddCustomAccessory — POSTs to /api/faults so the fault master list
+     (faultList) grows, then swaps this row's custom text input back to a normal selected
+     value. NOTE: assumes /api/faults POST accepts { name } and returns the saved fault the
+     same way physical-conditions/accessories do — confirm faultRoutes.js matches if this 404s. */
+  const handleAddCustomFault = async (i) => {
+    const val = (customFaults[i] || "").trim();
+    if (!val) return;
+    setAddingFault(prev => ({ ...prev, [i]: true }));
+    try {
+      const res = await axios.post(`${API}/api/faults`, { name: val });
+      const newFault = res.data.data || res.data;
+      setFaultList(prev => {
+        const exists = prev.some(f => f.name.toLowerCase() === newFault.name.toLowerCase());
+        return exists ? prev : [newFault, ...prev];
+      });
+      setCustomFaults(prev => {
+        const copy = { ...prev };
+        delete copy[i];
+        return copy;
+      });
+      updateIssue(i, newFault.name);
+    } catch (err) {
+      console.error(err);
+      alert(err.response?.data?.message || "Failed to add fault ❌");
+    } finally {
+      setAddingFault(prev => ({ ...prev, [i]: false }));
     }
   };
 
@@ -1227,13 +1322,29 @@ if (!user || !user.username) {
                         menuPortalTarget={document.body}
                       />
                       </Field>
+                      {/* ================= MAKE ADD-NEW (UPDATED) =================
+                          Was a plain input that only set customMake locally. Now has an
+                          "Add" button (same pattern as Physical Condition/Accessories) that
+                          POSTs to /api/makes so the Make actually appears in future dropdowns. */}
                       {make === "__custom" && (
-                        <input
-                          className="form-control form-control-sm mt-2"
-                          placeholder="Enter Make"
-                          value={customMake}
-                          onChange={(e) => setCustomMake(e.target.value)}
-                        />
+                        <div className="d-flex gap-1 mt-2">
+                          <input
+                            className="form-control form-control-sm"
+                            placeholder="Enter Make"
+                            value={customMake}
+                            onChange={(e) => setCustomMake(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAddCustomMake(); } }}
+                          />
+                          <button
+                            type="button"
+                            className="btn btn-sm"
+                            style={{ background: RED, color: "#fff", fontWeight: 600, whiteSpace: "nowrap" }}
+                            disabled={addingMake || !customMake.trim()}
+                            onClick={handleAddCustomMake}
+                          >
+                            {addingMake ? "..." : "Add"}
+                          </button>
+                        </div>
                       )}
                     </div>
 
@@ -1255,13 +1366,28 @@ if (!user || !user.username) {
                         menuPortalTarget={document.body}
                       />
                       </Field>
+                      {/* ================= MODEL ADD-NEW (UPDATED) =================
+                          Same fix as Make — POSTs { name, make } to /api/models so the model
+                          master list actually grows and shows up in the next job sheet's search. */}
                       {model === "__custom" && (
-                        <input
-                          className="form-control form-control-sm mt-2"
-                          placeholder="Enter Model"
-                          value={customModel}
-                          onChange={(e) => setCustomModel(e.target.value)}
-                        />
+                        <div className="d-flex gap-1 mt-2">
+                          <input
+                            className="form-control form-control-sm"
+                            placeholder="Enter Model"
+                            value={customModel}
+                            onChange={(e) => setCustomModel(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAddCustomModel(); } }}
+                          />
+                          <button
+                            type="button"
+                            className="btn btn-sm"
+                            style={{ background: RED, color: "#fff", fontWeight: 600, whiteSpace: "nowrap" }}
+                            disabled={addingModel || !customModel.trim()}
+                            onClick={handleAddCustomModel}
+                          >
+                            {addingModel ? "..." : "Add"}
+                          </button>
+                        </div>
                       )}
                     </div>
 
@@ -1647,17 +1773,33 @@ if (!user || !user.username) {
                         }}
                       />
                      
+                      {/* ================= FAULT ADD-NEW (UPDATED) =================
+                          Was a plain input that only updated this row's visualIssues entry.
+                          Now has an "Add" button that POSTs to /api/faults so the fault
+                          master list actually grows for future job sheets' search/dropdown. */}
                       {customFaults[i] !== undefined && (
-                        <input
-                          className="form-control form-control-sm mt-2"
-                          placeholder="Enter Fault"
-                          value={customFaults[i]}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setCustomFaults(prev => ({ ...prev, [i]: val }));
-                            updateIssue(i, val);
-                          }}
-                        />
+                        <div className="d-flex gap-1 mt-2">
+                          <input
+                            className="form-control form-control-sm"
+                            placeholder="Enter Fault"
+                            value={customFaults[i]}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setCustomFaults(prev => ({ ...prev, [i]: val }));
+                              updateIssue(i, val);
+                            }}
+                            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAddCustomFault(i); } }}
+                          />
+                          <button
+                            type="button"
+                            className="btn btn-sm"
+                            style={{ background: RED, color: "#fff", fontWeight: 600, whiteSpace: "nowrap" }}
+                            disabled={addingFault[i] || !(customFaults[i] || "").trim()}
+                            onClick={() => handleAddCustomFault(i)}
+                          >
+                            {addingFault[i] ? "..." : "Add"}
+                          </button>
+                        </div>
                       )}
                       {visualIssues.length > 1 && (
                         <button

@@ -6,6 +6,7 @@ const FaultPopup = ({ onClose }) => {
   const [faultName, setFaultName] = useState("");
   const [editId, setEditId] = useState(null);
   const API = import.meta.env.VITE_API_URL;
+  
 
   useEffect(() => {
     fetchFaults();
@@ -36,6 +37,10 @@ const FaultPopup = ({ onClose }) => {
       setFaultName("");
       setEditId(null);
       fetchFaults();
+      // ✅ NEW — tells JobSheetPage (and anywhere else listening) that the fault master
+      // list changed, so its Visual Inspection dropdown can refetch immediately instead
+      // of staying stuck with whatever it had at page-load time.
+      window.dispatchEvent(new Event("faultListUpdated"));
 
     } catch (err) {
       console.error(err);
@@ -53,6 +58,8 @@ const FaultPopup = ({ onClose }) => {
 
     await axios.delete(`${API}/api/faults/${id}`);
     fetchFaults();
+    // ✅ NEW — same reason as above, so a deleted fault also disappears live from Job Sheet.
+    window.dispatchEvent(new Event("faultListUpdated"));
   };
 
   return (
