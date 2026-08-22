@@ -5,6 +5,7 @@ import {
   FaUserTie, FaUser, FaWrench, FaCogs, FaRupeeSign, FaBoxOpen,
   FaHandHoldingUsd, FaCoins, FaInstagram, FaStar, FaTable,
   FaChartBar, FaSearch, FaTimes, FaFileExcel, FaCalendarAlt,
+  FaChevronLeft, FaChevronRight, FaArrowsAltH,
 } from "react-icons/fa";
 
 const API = import.meta.env.VITE_API_URL;
@@ -66,7 +67,7 @@ const SummaryCard = ({ label, value, accent, icon }) => (
 const JOB_HEADERS = [
   "#", "Job Sheet", "Service Rep", "Created By", "Customer",
   "Contact", "Device", "Status",
-  "Service ₹", "Spare ₹", "Income ₹", "Others ₹", "Advance ₹", "Adv. Date",
+  "Service ₹", "Spare ₹", "Others ₹", "Advance ₹", "Adv. Date", "Income ₹",
   "Insta", "Google",
   "Received Date", "Delivered Date"
 ];
@@ -103,10 +104,9 @@ const JobRow = ({ job, i, rep }) => {
       </td>
       <td style={{ padding: "8px 10px", color: "#7c3aed", fontWeight: 500 }}>{sc ? fmt(sc) : "—"}</td>
       <td style={{ padding: "8px 10px", color: "#db2777", fontWeight: 500 }}>{sp ? fmt(sp) : "—"}</td>
-      <td style={{ padding: "8px 10px", color: "#0e7490", fontWeight: 500 }}>{inc ? fmt(inc) : "—"}</td>
       <td style={{ padding: "8px 10px", color: "#c2410c", fontWeight: 500 }}>{oth ? fmt(oth) : "—"}</td>
       <td style={{ padding: "8px 10px", color: "#0d6efd", fontWeight: 500 }}>{adv ? fmt(adv) : "—"}</td>
-            <td style={{ padding: "8px 10px", color: "#0369a1", fontSize: 11, whiteSpace: "nowrap" }}>
+      <td style={{ padding: "8px 10px", color: "#0369a1", fontSize: 11, whiteSpace: "nowrap" }}>
         {(() => {
           // ✅ FIX — fall back to the latest advanceItems date when the
           // single service.advanceDate field was never set (multi-item advances).
@@ -116,6 +116,7 @@ const JobRow = ({ job, i, rep }) => {
             : "—";
         })()}
       </td>
+      <td style={{ padding: "8px 10px", color: "#0e7490", fontWeight: 500 }}>{inc ? fmt(inc) : "—"}</td>
       <td style={{ padding: "8px 10px", textAlign: "center" }}><SocialText val={job.service?.instaFollowers} /></td>
       <td style={{ padding: "8px 10px", textAlign: "center" }}><SocialText val={job.service?.googleReview} /></td>
       <td style={{ padding: "8px 10px", color: "#6c757d", whiteSpace: "nowrap" }}>
@@ -127,6 +128,51 @@ const JobRow = ({ job, i, rep }) => {
           : "—"}
       </td>
     </tr>
+  );
+};
+
+const TableHead = () => (
+  <thead>
+    <tr style={{ background: "#f8f9fa" }}>
+      {JOB_HEADERS.map(h => (
+        <th key={h} style={{ padding: "8px 10px", textAlign: "left", borderBottom: "1px solid #e9ecef", color: "#6c757d", fontWeight: 500, fontSize: 12, whiteSpace: "nowrap" }}>{h}</th>
+      ))}
+    </tr>
+  </thead>
+);
+
+// ---------------------------------------------------------------------
+// ✅ NEW — reusable horizontal-scroll control.
+// Sits below the search bar. Clicking left/right scrolls EVERY table
+// on the page (every element carrying the "scrollable-table" class)
+// together, so it works whether there's one rep's table or many
+// stacked underneath each other.
+// ---------------------------------------------------------------------
+const ScrollControls = () => {
+  const scrollTables = (amount) => {
+    document.querySelectorAll(".scrollable-table").forEach((el) => {
+      el.scrollBy({ left: amount, behavior: "smooth" });
+    });
+  };
+
+  const btnStyle = {
+    width: 30, height: 30, borderRadius: 6, border: "1px solid #dee2e6",
+    background: "#fff", color: "#495057", display: "flex",
+    alignItems: "center", justifyContent: "center", cursor: "pointer",
+  };
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+      <span style={{ fontSize: 12, color: "#6c757d", display: "flex", alignItems: "center", gap: 5 }}>
+        <FaArrowsAltH size={11} /> 
+      </span>
+      <button type="button" style={btnStyle} onClick={() => scrollTables(-300)} title="Scroll left">
+        <FaChevronLeft size={12} />
+      </button>
+      <button type="button" style={btnStyle} onClick={() => scrollTables(300)} title="Scroll right">
+        <FaChevronRight size={12} />
+      </button>
+    </div>
   );
 };
 
@@ -225,12 +271,12 @@ const ServiceRepReportPage = () => {
           "Status":         job.device?.mobileStatus || "—",
           "Service Charge": sc,
           "Spare Charge":   sp,
-          "Income":         inc,
           "Others":         oth,
           "Advance":        Number(job.service?.advanceAmount || 0),
           "Advance Date":   job.service?.advanceDate
             ? new Date(job.service.advanceDate).toLocaleDateString("en-IN")
             : "—",
+          "Income":         inc,
 
           "Insta Follow":   job.service?.instaFollowers || "—",
           "Google Review":  job.service?.googleReview   || "—",
@@ -246,16 +292,6 @@ const ServiceRepReportPage = () => {
     XLSX.utils.book_append_sheet(wb, ws, "SalesRep Report");
     XLSX.writeFile(wb, `SalesRepReport_${new Date().toLocaleDateString("en-GB").replace(/\//g, "-")}.xlsx`);
   };
-
-  const TableHead = () => (
-    <thead>
-      <tr style={{ background: "#f8f9fa" }}>
-        {JOB_HEADERS.map(h => (
-          <th key={h} style={{ padding: "8px 10px", textAlign: "left", borderBottom: "1px solid #e9ecef", color: "#6c757d", fontWeight: 500, fontSize: 12, whiteSpace: "nowrap" }}>{h}</th>
-        ))}
-      </tr>
-    </thead>
-  );
 
   return (
     <div style={{ maxWidth: 1400, margin: "0 auto", padding: "24px 16px", fontFamily: "system-ui, sans-serif" }}>
@@ -330,6 +366,10 @@ const ServiceRepReportPage = () => {
           </button>
         </div>
       )}
+
+      {/* ✅ NEW — scroll control, right below the search/filter bar */}
+      <ScrollControls />
+
       {loading && <div className="text-center py-4 text-muted">Loading...</div>}
       {!loading && repList.length === 0 && <div className="text-center text-muted py-4">No data found</div>}
 
@@ -358,10 +398,9 @@ const ServiceRepReportPage = () => {
                 {[
                   { label: "Service",   val: fmt(uSC),  color: "#7c3aed" },
                   { label: "Spare",     val: fmt(uSP),  color: "#db2777" },
-                  { label: "Income",    val: fmt(uINC), color: "#0e7490" },
                   { label: "Others",    val: fmt(uOTH), color: "#c2410c" },
-
                   { label: "Advance",   val: fmt(uADV), color: "#0d6efd" },
+                  { label: "Income",    val: fmt(uINC), color: "#0e7490" },
                   { label: "Insta",  val: uInsta,    color: "#e11d48" },
                   { label: "Google", val: uGoogle,   color: "#d97706" },
                 ].map(p => (
@@ -373,7 +412,8 @@ const ServiceRepReportPage = () => {
               </div>
             </div>
 
-            <div style={{ overflowX: "auto" }}>
+            {/* ✅ className added so ScrollControls buttons can find & scroll this */}
+            <div className="scrollable-table" style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <TableHead />
                 <tbody>
@@ -383,10 +423,10 @@ const ServiceRepReportPage = () => {
                     <td colSpan={8} style={{ padding: "8px 10px", fontWeight: 700, fontSize: 13, color: "#166534" }}>Subtotal — {rep}</td>
                     <td style={{ padding: "8px 10px", fontWeight: 700, color: "#7c3aed" }}>{fmt(uSC)}</td>
                     <td style={{ padding: "8px 10px", fontWeight: 700, color: "#db2777" }}>{fmt(uSP)}</td>
-                    <td style={{ padding: "8px 10px", fontWeight: 700, color: "#0e7490" }}>{fmt(uINC)}</td>
                     <td style={{ padding: "8px 10px", fontWeight: 700, color: "#c2410c" }}>{fmt(uOTH)}</td>
                     <td style={{ padding: "8px 10px", fontWeight: 700, color: "#0d6efd" }}>{fmt(uADV)}</td>
                     <td />
+                    <td style={{ padding: "8px 10px", fontWeight: 700, color: "#0e7490" }}>{fmt(uINC)}</td>
                     <td style={{ padding: "8px 10px", fontWeight: 700, color: "#e11d48", textAlign: "center" }}>{uInsta}</td>
                     <td style={{ padding: "8px 10px", fontWeight: 700, color: "#d97706", textAlign: "center" }}>{uGoogle}</td>
                     <td />
@@ -412,11 +452,11 @@ const ServiceRepReportPage = () => {
           {!repFilter && (
             <div style={{ border: "1px solid #e9ecef", borderRadius: 10, overflow: "hidden", marginBottom: 28, boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
               <div style={{ padding: "10px 16px", background: "#f8f9fa", borderBottom: "1px solid #e9ecef", fontWeight: 600, fontSize: 14 }}>All Service Reps — Overview</div>
-              <div style={{ overflowX: "auto" }}>
+              <div className="scrollable-table" style={{ overflowX: "auto" }}>
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                   <thead>
                     <tr style={{ background: "#f8f9fa" }}>
-                      {["Service Rep", "Total Jobs", "Service ₹", "Spare ₹", "Income ₹", "Others ₹", "Advance ₹", "Insta Yes", "Google Yes"].map(h => (
+                      {["Service Rep", "Total Jobs", "Service ₹", "Spare ₹", "Others ₹", "Advance ₹", "Income ₹", "Insta Yes", "Google Yes"].map(h => (
                         <th key={h} style={{ padding: "9px 12px", borderBottom: "1px solid #e9ecef", color: "#6c757d", fontWeight: 500, fontSize: 12, whiteSpace: "nowrap" }}>{h}</th>
                       ))}
                     </tr>
@@ -438,9 +478,9 @@ const ServiceRepReportPage = () => {
                         </td>
                         <td style={{ padding: "9px 12px", color: "#7c3aed", fontWeight: 600 }}>{fmt(u.serviceCharge)}</td>
                         <td style={{ padding: "9px 12px", color: "#db2777", fontWeight: 600 }}>{fmt(u.spareCharge)}</td>
-                        <td style={{ padding: "9px 12px", color: "#0e7490", fontWeight: 600 }}>{fmt(u.income)}</td>
                         <td style={{ padding: "9px 12px", color: "#c2410c", fontWeight: 600 }}>{fmt(u.others)}</td>
                         <td style={{ padding: "9px 12px", color: "#0d6efd", fontWeight: 600 }}>{fmt(u.advance)}</td>
+                        <td style={{ padding: "9px 12px", color: "#0e7490", fontWeight: 600 }}>{fmt(u.income)}</td>
                         <td style={{ padding: "9px 12px", color: "#e11d48", fontWeight: 600, textAlign: "center" }}>{u.instaYes}</td>
                         <td style={{ padding: "9px 12px", color: "#d97706", fontWeight: 600, textAlign: "center" }}>{u.googleYes}</td>
                       </tr>
@@ -450,9 +490,9 @@ const ServiceRepReportPage = () => {
                       <td style={{ padding: "9px 12px", textAlign: "center", fontWeight: 700 }}>{totalJobs}</td>
                       <td style={{ padding: "9px 12px", fontWeight: 700, color: "#7c3aed" }}>{fmt(totalService)}</td>
                       <td style={{ padding: "9px 12px", fontWeight: 700, color: "#db2777" }}>{fmt(totalSpare)}</td>
-                      <td style={{ padding: "9px 12px", fontWeight: 700, color: "#0e7490" }}>{fmt(totalIncome)}</td>
                       <td style={{ padding: "9px 12px", fontWeight: 700, color: "#c2410c" }}>{fmt(totalOthers)}</td>
                       <td style={{ padding: "9px 12px", fontWeight: 700, color: "#0d6efd" }}>{fmt(totalAdvance)}</td>
+                      <td style={{ padding: "9px 12px", fontWeight: 700, color: "#0e7490" }}>{fmt(totalIncome)}</td>
                       <td style={{ padding: "9px 12px", fontWeight: 700, color: "#e11d48", textAlign: "center" }}>{totalInstaYes}</td>
                       <td style={{ padding: "9px 12px", fontWeight: 700, color: "#d97706", textAlign: "center" }}>{totalGoogleYes}</td>
                     </tr>
@@ -479,10 +519,9 @@ const ServiceRepReportPage = () => {
                       <SummaryCard label="Total Jobs"     value={u.jobs} />
                       <SummaryCard label="Service Charge" value={fmt(u.serviceCharge)} accent="#7c3aed" icon={<FaWrench size={11} color="#7c3aed" />} />
                       <SummaryCard label="Spare Charge"   value={fmt(u.spareCharge)}   accent="#db2777" icon={<FaCogs size={11} color="#db2777" />} />
-                      <SummaryCard label="Income"         value={fmt(u.income)}        accent="#0e7490" icon={<FaRupeeSign size={11} color="#0e7490" />} />
                       <SummaryCard label="Others"         value={fmt(u.others)}        accent="#c2410c" icon={<FaBoxOpen size={11} color="#c2410c" />} />
-
                       <SummaryCard label="Advance"        value={fmt(u.advance)}        accent="#0d6efd" icon={<FaHandHoldingUsd size={11} color="#0d6efd" />} />
+                      <SummaryCard label="Income"         value={fmt(u.income)}        accent="#0e7490" icon={<FaRupeeSign size={11} color="#0e7490" />} />
                       <SummaryCard label="Insta Yes"  value={u.instaYes}             accent="#e11d48" icon={<FaInstagram size={11} color="#e11d48" />} />
                       <SummaryCard label="Google Yes" value={u.googleYes}            accent="#d97706" icon={<FaStar size={11} color="#d97706" />} />
                     </div>
@@ -501,7 +540,7 @@ const ServiceRepReportPage = () => {
               })()}
 
               <div style={{ border: "1px solid #e9ecef", borderRadius: 10, overflow: "hidden", boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
-                <div style={{ overflowX: "auto" }}>
+                <div className="scrollable-table" style={{ overflowX: "auto" }}>
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                     <TableHead />
                     <tbody>
