@@ -66,9 +66,9 @@ const SummaryCard = ({ label, value, accent, icon }) => (
 const JOB_HEADERS = [
   "#", "Job Sheet", "Service Rep", "Created By", "Customer",
   "Contact", "Device", "Status",
-  "Service ₹", "Spare ₹", "Income ₹", "Others ₹", "Margin ₹", "Advance ₹", "Adv. Date", "Total ₹",
+  "Service ₹", "Spare ₹", "Income ₹", "Others ₹", "Advance ₹", "Adv. Date",
   "Insta", "Google",
-  "Date"
+  "Received Date", "Delivered Date"
 ];
 
 const JobRow = ({ job, i, rep }) => {
@@ -76,9 +76,7 @@ const JobRow = ({ job, i, rep }) => {
   const sp  = Number(job.service?.spareCharge   || 0);
   const inc = Number(job.service?.income        || 0);
   const oth = Number(job.service?.othersAmount  || 0);
-  const mg  = Number(job.service?.margin        || 0);
   const adv = Number(job.service?.advanceAmount || 0);
-  const tot = sc + sp + inc + oth;
   return (
     <tr style={{ borderBottom: "1px solid #f0f0f0" }}
       onMouseEnter={e => e.currentTarget.style.background = "#f8f9fa"}
@@ -107,18 +105,26 @@ const JobRow = ({ job, i, rep }) => {
       <td style={{ padding: "8px 10px", color: "#db2777", fontWeight: 500 }}>{sp ? fmt(sp) : "—"}</td>
       <td style={{ padding: "8px 10px", color: "#0e7490", fontWeight: 500 }}>{inc ? fmt(inc) : "—"}</td>
       <td style={{ padding: "8px 10px", color: "#c2410c", fontWeight: 500 }}>{oth ? fmt(oth) : "—"}</td>
-      <td style={{ padding: "8px 10px", color: "#f59e0b", fontWeight: 500 }}>{mg ? fmt(mg) : "—"}</td>
       <td style={{ padding: "8px 10px", color: "#0d6efd", fontWeight: 500 }}>{adv ? fmt(adv) : "—"}</td>
-      <td style={{ padding: "8px 10px", color: "#0369a1", fontSize: 11, whiteSpace: "nowrap" }}>
-        {job.service?.advanceDate
-          ? new Date(job.service.advanceDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" })
-          : "—"}
+            <td style={{ padding: "8px 10px", color: "#0369a1", fontSize: 11, whiteSpace: "nowrap" }}>
+        {(() => {
+          // ✅ FIX — fall back to the latest advanceItems date when the
+          // single service.advanceDate field was never set (multi-item advances).
+          const advDate = job.service?.advanceDate || job.service?.advanceItems?.slice(-1)[0]?.date;
+          return advDate
+            ? new Date(advDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" })
+            : "—";
+        })()}
       </td>
-      <td style={{ padding: "8px 10px", color: "#059669", fontWeight: 600 }}>{tot ? fmt(tot) : "—"}</td>
       <td style={{ padding: "8px 10px", textAlign: "center" }}><SocialText val={job.service?.instaFollowers} /></td>
       <td style={{ padding: "8px 10px", textAlign: "center" }}><SocialText val={job.service?.googleReview} /></td>
       <td style={{ padding: "8px 10px", color: "#6c757d", whiteSpace: "nowrap" }}>
-        {new Date(job.createdAt).toLocaleDateString()}
+        {new Date(job.createdAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" })}
+      </td>
+      <td style={{ padding: "8px 10px", color: "#3B6D11", fontSize: 11, whiteSpace: "nowrap" }}>
+        {job.service?.deliveryDate
+          ? new Date(job.service.deliveryDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" })
+          : "—"}
       </td>
     </tr>
   );
@@ -127,7 +133,11 @@ const JobRow = ({ job, i, rep }) => {
 const ServiceRepReportPage = () => {
   const currentUser = JSON.parse(sessionStorage.getItem("user"));
   const currentRole = currentUser?.role;
-  const currentName = currentUser?.name || currentUser?.username || "";
+
+  const currentUsername    = currentUser?.username || "";
+  const currentDisplayName = currentUser?.name || currentUser?.username || "";
+  const currentName        = currentUsername || currentDisplayName;
+
   const [data,       setData]       = useState({});
   const [loading,    setLoading]    = useState(false);
   const [searchText, setSearchText] = useState("");
@@ -171,7 +181,6 @@ const ServiceRepReportPage = () => {
   const totalSpare   = allJobs.reduce((s, j) => s + Number(j.service?.spareCharge   || 0), 0);
   const totalIncome  = allJobs.reduce((s, j) => s + Number(j.service?.income        || 0), 0);
   const totalOthers  = allJobs.reduce((s, j) => s + Number(j.service?.othersAmount  || 0), 0);
-  const totalMargin  = allJobs.reduce((s, j) => s + Number(j.service?.margin        || 0), 0);
   const totalAdvance = allJobs.reduce((s, j) => s + Number(j.service?.advanceAmount || 0), 0);
   const grandTotal   = totalService + totalSpare + totalIncome + totalOthers;
   const totalInstaYes  = allJobs.filter(j => j.service?.instaFollowers === "Yes").length;
@@ -183,7 +192,6 @@ const ServiceRepReportPage = () => {
     const sp  = jobs.reduce((s, j) => s + Number(j.service?.spareCharge   || 0), 0);
     const inc = jobs.reduce((s, j) => s + Number(j.service?.income        || 0), 0);
     const oth = jobs.reduce((s, j) => s + Number(j.service?.othersAmount  || 0), 0);
-    const mg  = jobs.reduce((s, j) => s + Number(j.service?.margin        || 0), 0);
     const adv = jobs.reduce((s, j) => s + Number(j.service?.advanceAmount || 0), 0);
     const instaYes  = jobs.filter(j => j.service?.instaFollowers === "Yes").length;
     const googleYes = jobs.filter(j => j.service?.googleReview   === "Yes").length;
@@ -192,7 +200,7 @@ const ServiceRepReportPage = () => {
       const st = j.device?.mobileStatus || "Unknown";
       statusCount[st] = (statusCount[st] || 0) + 1;
     });
-    return { rep, jobs: jobs.length, serviceCharge: sc, spareCharge: sp, income: inc, others: oth, margin: mg, advance: adv, total: sc + sp + inc + oth, instaYes, googleYes, statusCount };
+    return { rep, jobs: jobs.length, serviceCharge: sc, spareCharge: sp, income: inc, others: oth, advance: adv, instaYes, googleYes, statusCount };
   });
 
   const dashRep  = repFilter || repList[0] || "";
@@ -219,15 +227,17 @@ const ServiceRepReportPage = () => {
           "Spare Charge":   sp,
           "Income":         inc,
           "Others":         oth,
-          "Margin":         Number(job.service?.margin        || 0),
           "Advance":        Number(job.service?.advanceAmount || 0),
           "Advance Date":   job.service?.advanceDate
             ? new Date(job.service.advanceDate).toLocaleDateString("en-IN")
             : "—",
-          "Total":          sc + sp + inc + oth,
+
           "Insta Follow":   job.service?.instaFollowers || "—",
           "Google Review":  job.service?.googleReview   || "—",
-          "Date":           new Date(job.createdAt).toLocaleDateString(),
+          "Received Date":  new Date(job.createdAt).toLocaleDateString("en-IN"),
+          "Delivered Date": job.service?.deliveryDate
+            ? new Date(job.service.deliveryDate).toLocaleDateString("en-IN")
+            : "—",
         });
       });
     });
@@ -252,7 +262,7 @@ const ServiceRepReportPage = () => {
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12, marginBottom: 20 }}>
         <h4 style={{ fontWeight: 700, margin: 0, fontSize: 20, display: "flex", alignItems: "center", gap: 8 }}>
-          <FaUserTie /> {currentRole !== "admin" ? `${currentName}'s Report` : "Service Rep Report"}
+          <FaUserTie /> {currentRole !== "admin" ? `${currentDisplayName}'s Report` : "Service Rep Report"}
         </h4>
         <div style={{ display: "flex", background: "#f1f3f5", borderRadius: 8, padding: 3 }}>
           {[["table", "Table", FaTable], ["dashboard", "Dashboard", FaChartBar]].map(([val, label, Icon]) => (
@@ -275,9 +285,8 @@ const ServiceRepReportPage = () => {
         <SummaryCard label="Spare Total"   value={fmt(totalSpare)}    accent="#db2777" icon={<FaCogs size={11} color="#db2777" />} />
         <SummaryCard label="Income Total"  value={fmt(totalIncome)}   accent="#0e7490" icon={<FaRupeeSign size={11} color="#0e7490" />} />
         <SummaryCard label="Others Total"  value={fmt(totalOthers)}   accent="#c2410c" icon={<FaBoxOpen size={11} color="#c2410c" />} />
-        <SummaryCard label="Grand Total"   value={fmt(grandTotal)}    accent="#059669" icon={<FaCoins size={11} color="#059669" />} />
+
         <SummaryCard label="Total Advance" value={fmt(totalAdvance)}  accent="#0d6efd" icon={<FaHandHoldingUsd size={11} color="#0d6efd" />} />
-        <SummaryCard label="Total Margin"  value={fmt(totalMargin)}   accent="#f59e0b" />
         <SummaryCard label="Instagram"     value={totalInstaYes}      accent="#e11d48" icon={<FaInstagram size={11} color="#e11d48" />} />
         <SummaryCard label="Google Review" value={totalGoogleYes}     accent="#d97706" icon={<FaStar size={11} color="#d97706" />} />
       </div>
@@ -330,9 +339,7 @@ const ServiceRepReportPage = () => {
         const uSP  = jobs.reduce((s, j) => s + Number(j.service?.spareCharge   || 0), 0);
         const uINC = jobs.reduce((s, j) => s + Number(j.service?.income        || 0), 0);
         const uOTH = jobs.reduce((s, j) => s + Number(j.service?.othersAmount  || 0), 0);
-        const uMG  = jobs.reduce((s, j) => s + Number(j.service?.margin        || 0), 0);
         const uADV = jobs.reduce((s, j) => s + Number(j.service?.advanceAmount || 0), 0);
-        const uTOT = uSC + uSP + uINC + uOTH;
         const uInsta  = jobs.filter(j => j.service?.instaFollowers === "Yes").length;
         const uGoogle = jobs.filter(j => j.service?.googleReview   === "Yes").length;
 
@@ -353,9 +360,8 @@ const ServiceRepReportPage = () => {
                   { label: "Spare",     val: fmt(uSP),  color: "#db2777" },
                   { label: "Income",    val: fmt(uINC), color: "#0e7490" },
                   { label: "Others",    val: fmt(uOTH), color: "#c2410c" },
-                  { label: "Total",     val: fmt(uTOT), color: "#059669" },
+
                   { label: "Advance",   val: fmt(uADV), color: "#0d6efd" },
-                  { label: "Margin",    val: fmt(uMG),  color: "#f59e0b" },
                   { label: "Insta",  val: uInsta,    color: "#e11d48" },
                   { label: "Google", val: uGoogle,   color: "#d97706" },
                 ].map(p => (
@@ -379,12 +385,11 @@ const ServiceRepReportPage = () => {
                     <td style={{ padding: "8px 10px", fontWeight: 700, color: "#db2777" }}>{fmt(uSP)}</td>
                     <td style={{ padding: "8px 10px", fontWeight: 700, color: "#0e7490" }}>{fmt(uINC)}</td>
                     <td style={{ padding: "8px 10px", fontWeight: 700, color: "#c2410c" }}>{fmt(uOTH)}</td>
-                    <td style={{ padding: "8px 10px", fontWeight: 700, color: "#f59e0b" }}>{fmt(uMG)}</td>
                     <td style={{ padding: "8px 10px", fontWeight: 700, color: "#0d6efd" }}>{fmt(uADV)}</td>
                     <td />
-                    <td style={{ padding: "8px 10px", fontWeight: 700, color: "#059669" }}>{fmt(uTOT)}</td>
                     <td style={{ padding: "8px 10px", fontWeight: 700, color: "#e11d48", textAlign: "center" }}>{uInsta}</td>
                     <td style={{ padding: "8px 10px", fontWeight: 700, color: "#d97706", textAlign: "center" }}>{uGoogle}</td>
+                    <td />
                     <td />
                   </tr>
                 </tbody>
@@ -411,7 +416,7 @@ const ServiceRepReportPage = () => {
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                   <thead>
                     <tr style={{ background: "#f8f9fa" }}>
-                      {["Service Rep", "Total Jobs", "Service ₹", "Spare ₹", "Income ₹", "Others ₹", "Total ₹", "Advance ₹", "Margin ₹", "Insta Yes", "Google Yes"].map(h => (
+                      {["Service Rep", "Total Jobs", "Service ₹", "Spare ₹", "Income ₹", "Others ₹", "Advance ₹", "Insta Yes", "Google Yes"].map(h => (
                         <th key={h} style={{ padding: "9px 12px", borderBottom: "1px solid #e9ecef", color: "#6c757d", fontWeight: 500, fontSize: 12, whiteSpace: "nowrap" }}>{h}</th>
                       ))}
                     </tr>
@@ -435,23 +440,19 @@ const ServiceRepReportPage = () => {
                         <td style={{ padding: "9px 12px", color: "#db2777", fontWeight: 600 }}>{fmt(u.spareCharge)}</td>
                         <td style={{ padding: "9px 12px", color: "#0e7490", fontWeight: 600 }}>{fmt(u.income)}</td>
                         <td style={{ padding: "9px 12px", color: "#c2410c", fontWeight: 600 }}>{fmt(u.others)}</td>
-                        <td style={{ padding: "9px 12px", color: "#059669", fontWeight: 700 }}>{fmt(u.total)}</td>
                         <td style={{ padding: "9px 12px", color: "#0d6efd", fontWeight: 600 }}>{fmt(u.advance)}</td>
-                        <td style={{ padding: "9px 12px", color: "#f59e0b", fontWeight: 600 }}>{fmt(u.margin)}</td>
                         <td style={{ padding: "9px 12px", color: "#e11d48", fontWeight: 600, textAlign: "center" }}>{u.instaYes}</td>
                         <td style={{ padding: "9px 12px", color: "#d97706", fontWeight: 600, textAlign: "center" }}>{u.googleYes}</td>
                       </tr>
                     ))}
                     <tr style={{ background: "#f0fdf4", borderTop: "2px solid #bbf7d0" }}>
-                      <td style={{ padding: "9px 12px", fontWeight: 700, color: "#166534" }}>Grand Total</td>
+
                       <td style={{ padding: "9px 12px", textAlign: "center", fontWeight: 700 }}>{totalJobs}</td>
                       <td style={{ padding: "9px 12px", fontWeight: 700, color: "#7c3aed" }}>{fmt(totalService)}</td>
                       <td style={{ padding: "9px 12px", fontWeight: 700, color: "#db2777" }}>{fmt(totalSpare)}</td>
                       <td style={{ padding: "9px 12px", fontWeight: 700, color: "#0e7490" }}>{fmt(totalIncome)}</td>
                       <td style={{ padding: "9px 12px", fontWeight: 700, color: "#c2410c" }}>{fmt(totalOthers)}</td>
-                      <td style={{ padding: "9px 12px", fontWeight: 700, color: "#059669" }}>{fmt(grandTotal)}</td>
                       <td style={{ padding: "9px 12px", fontWeight: 700, color: "#0d6efd" }}>{fmt(totalAdvance)}</td>
-                      <td style={{ padding: "9px 12px", fontWeight: 700, color: "#f59e0b" }}>{fmt(totalMargin)}</td>
                       <td style={{ padding: "9px 12px", fontWeight: 700, color: "#e11d48", textAlign: "center" }}>{totalInstaYes}</td>
                       <td style={{ padding: "9px 12px", fontWeight: 700, color: "#d97706", textAlign: "center" }}>{totalGoogleYes}</td>
                     </tr>
@@ -480,9 +481,8 @@ const ServiceRepReportPage = () => {
                       <SummaryCard label="Spare Charge"   value={fmt(u.spareCharge)}   accent="#db2777" icon={<FaCogs size={11} color="#db2777" />} />
                       <SummaryCard label="Income"         value={fmt(u.income)}        accent="#0e7490" icon={<FaRupeeSign size={11} color="#0e7490" />} />
                       <SummaryCard label="Others"         value={fmt(u.others)}        accent="#c2410c" icon={<FaBoxOpen size={11} color="#c2410c" />} />
-                      <SummaryCard label="Total Amount"   value={fmt(u.total)}          accent="#059669" icon={<FaCoins size={11} color="#059669" />} />
+
                       <SummaryCard label="Advance"        value={fmt(u.advance)}        accent="#0d6efd" icon={<FaHandHoldingUsd size={11} color="#0d6efd" />} />
-                      <SummaryCard label="Margin"         value={fmt(u.margin)}         accent="#f59e0b" />
                       <SummaryCard label="Insta Yes"  value={u.instaYes}             accent="#e11d48" icon={<FaInstagram size={11} color="#e11d48" />} />
                       <SummaryCard label="Google Yes" value={u.googleYes}            accent="#d97706" icon={<FaStar size={11} color="#d97706" />} />
                     </div>

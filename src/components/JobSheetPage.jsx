@@ -13,7 +13,7 @@ import { useNavigate } from "react-router-dom";
 import {
   FileText, Save, RefreshCw, Calculator, Receipt, Home, Plus, Ban,
   Menu, Bell, Bandage, Gift, User, Smartphone, Wrench, Eye,
-  Instagram, Star, Package, Wallet, ThumbsUp, X
+  Instagram, Star, Package, Wallet, ThumbsUp, X, Calendar
 } from "lucide-react";
 
 const isValidEmail = (email) =>
@@ -24,6 +24,36 @@ const isValidIMEI = (imei) => /^\d{15}$/.test(imei);
 const isRequired = (value) => value && value.toString().trim().length > 0;
 
 const onlyNumbers = (value) => value.replace(/\D/g, "");
+
+/* ================= FREE TYPO-TOLERANT FUZZY SEARCH (NEW) =================
+   No API/cost — plain Levenshtein edit-distance. Used as a custom filterOption for the
+   Make / Model / Fault / Physical Condition / Accessories react-select dropdowns so a typo
+   like "Semsung" still finds "Samsung" in the master list. Since the user still has to PICK
+   an option from the list, the saved value is always the correctly-spelled master entry. */
+const levenshtein = (a, b) => {
+  const m = a.length, n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      if (a[i - 1] === b[j - 1]) dp[i][j] = dp[i - 1][j - 1];
+      else dp[i][j] = 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+    }
+  }
+  return dp[m][n];
+};
+
+const fuzzyFilterOption = (option, inputValue) => {
+  if (!inputValue) return true;
+  const label = (option.label || "").toLowerCase();
+  const input = inputValue.toLowerCase();
+  if (label.includes(input)) return true; // normal substring match still works first
+  const maxDist = Math.max(1, Math.ceil(input.length * 0.3)); // ~30% typo tolerance
+  return label.split(/\s+/).some(word => levenshtein(word, input) <= maxDist);
+};
 
 /* ================= RADNUS THEME (SOFTENED) ================= */
 const RED = "#DC2626";
@@ -434,8 +464,7 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
   /* ================= ADD NEW FAULT / VISUAL ISSUE (NEW) =================
      Mirrors handleAddCustomAccessory — POSTs to /api/faults so the fault master list
      (faultList) grows, then swaps this row's custom text input back to a normal selected
-     value. NOTE: assumes /api/faults POST accepts { name } and returns the saved fault the
-     same way physical-conditions/accessories do — confirm faultRoutes.js matches if this 404s. */
+     value. */
   const handleAddCustomFault = async (i) => {
     const val = (customFaults[i] || "").trim();
     if (!val) return;
@@ -514,6 +543,51 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
       .then(res => setDrawerList(res.data));
   }, []);
 
+  /* ================= LIVE MASTER-LIST REFRESH (NEW) =================
+     Fault/Make/Model/Drawer master lists can also be edited from the sidebar's "Data
+     Operation" popups (FaultPopup, AdminMakeModal, AdminModelModal, DrawerPopup). Those popups
+     are just an overlay on top of THIS page — no navigation/remount happens — so JobSheetPage's
+     own faultList/makeList/modelList/drawerList state never knew to refresh after a popup save.
+     Each popup now dispatches a matching custom window event on save/delete; these listeners
+     catch that event and refetch, so the Job Sheet dropdowns update live without needing a
+     page reload. */
+  useEffect(() => {
+    const refetchFaults = () => {
+      axios.get(`${API}/api/faults`)
+        .then(res => setFaultList(res.data))
+        .catch(err => console.error("Fault refetch error:", err));
+    };
+    const refetchMakes = () => {
+      axios.get(`${API}/api/makes`)
+        .then(res => setMakeList(res.data))
+        .catch(err => console.error("Make refetch error:", err));
+    };
+    const refetchModels = () => {
+      const selectedMake = make === "__custom" ? customMake : make;
+      if (!selectedMake) return;
+      axios.get(`${API}/api/models/${selectedMake}`)
+        .then(res => setModelList(res.data))
+        .catch(err => console.error("Model refetch error:", err));
+    };
+    const refetchDrawers = () => {
+      axios.get(`${API}/api/drawers`)
+        .then(res => setDrawerList(res.data))
+        .catch(err => console.error("Drawer refetch error:", err));
+    };
+
+    window.addEventListener("faultListUpdated", refetchFaults);
+    window.addEventListener("makeListUpdated", refetchMakes);
+    window.addEventListener("modelListUpdated", refetchModels);
+    window.addEventListener("drawerListUpdated", refetchDrawers);
+
+    return () => {
+      window.removeEventListener("faultListUpdated", refetchFaults);
+      window.removeEventListener("makeListUpdated", refetchMakes);
+      window.removeEventListener("modelListUpdated", refetchModels);
+      window.removeEventListener("drawerListUpdated", refetchDrawers);
+    };
+  }, [make, customMake]);
+
   const [serviceCharge, setServiceCharge] = useState("");
   const [spareCharge, setSpareCharge] = useState("");
   const [spareItems, setSpareItems] = useState([]);
@@ -522,10 +596,21 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
 
   const [paymentMode, setPaymentMode] = useState("");
   const [income, setIncome] = useState("");
-  // ✅ NEW — tracks the date Income was last actually changed & saved.
+  // ✅ tracks the date Income was last actually changed & saved.
   // Income Report groups by this date, NOT repairDate, so income shows up
   // in the month it was actually entered (e.g. delivered/collected month).
   const [incomeDate, setIncomeDate] = useState("");
+
+  // ✅ NEW — true only when the USER manually picked a date in the Income Date field.
+  // If false, the date is auto-managed (today's date when Income changes).
+  const [incomeDateTouched, setIncomeDateTouched] = useState(false);
+
+  // ================= INCOME + INCOME DATE MERGED FIELD (NEW) =================
+  // Ref to the (visually hidden) native date input that lives inside the Income ₹ box.
+  // Clicking the calendar icon opens it via showPicker() so Income amount and Income
+  // Date share a single box instead of two separate fields.
+  const incomeDateRef = React.useRef(null);
+
   // Holds the income value as it was when the job sheet was loaded/last saved,
   // used to detect whether the user genuinely changed Income this session.
   const initialIncomeRef = React.useRef(0);
@@ -614,15 +699,15 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
       alert("⚠️ Delivery Date cannot be before Repair Date"); return;
     }
 
-    // ✅ Income date logic: if Income was actually changed this session (compared to what
-    // was loaded), stamp today's date. Otherwise keep whatever incomeDate already existed.
-    const todayStr = new Date().toISOString().slice(0, 10);
+    // ✅ Income date logic (priority order):
+    //   1. If user manually picked a date in the Income Date field → use that, always.
+    //   2. Else if Income amount actually changed this session → auto-stamp today.
+    //   3. Else keep whatever incomeDate already existed (or today if none yet).
+       const todayStr = new Date().toISOString().slice(0, 10);
     const incomeNum = Number(income || 0);
-    const incomeChanged = incomeNum !== Number(initialIncomeRef.current || 0);
     const finalIncomeDate = incomeNum > 0
-      ? (incomeChanged ? todayStr : (incomeDate || todayStr))
+      ? (incomeDate || todayStr)
       : "";
-
     try {
       const formData = new FormData();
       formData.append("jobSheetNo", jobSheetNo);
@@ -638,7 +723,7 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
         serviceCharge: Number(serviceCharge || 0),
         spareCharge: Number(spareCharge || 0),
         income: incomeNum,
-        incomeDate: finalIncomeDate, // ✅ NEW
+        incomeDate: finalIncomeDate, // ✅
 
         othersAmount: Number(othersAmount || 0),
         othersItems,
@@ -705,10 +790,15 @@ if (!user || !user.username) {
   return;
 }
 
-    // ✅ New job sheet: if Income has a value, today is the income date.
-    const todayStr = new Date().toISOString().slice(0, 10);
+    // ✅ New job sheet: if user manually picked a date, use it; otherwise auto = today
+    // (only when Income has a value).
+  
+
+         const todayStr = new Date().toISOString().slice(0, 10);
     const incomeNum = Number(income || 0);
-    const finalIncomeDate = incomeNum > 0 ? todayStr : "";
+    const finalIncomeDate = incomeNum > 0
+      ? (incomeDate || todayStr)
+      : "";
 
     try {
       const formData = new FormData();
@@ -729,7 +819,7 @@ if (!user || !user.username) {
         serviceCharge: Number(serviceCharge || 0),
         spareCharge: Number(spareCharge || 0),
         income: incomeNum,
-        incomeDate: finalIncomeDate, // ✅ NEW
+        incomeDate: finalIncomeDate, // ✅
 
         othersAmount: Number(othersAmount || 0),
         othersItems,
@@ -800,6 +890,7 @@ if (!user || !user.username) {
     setSpareItems([]);
     setIncome("");
     setIncomeDate("");
+    setIncomeDateTouched(false); // ✅ reset manual-pick flag on New
     initialIncomeRef.current = 0;
     setPaymentMode("");
     setRemarks("");
@@ -864,12 +955,13 @@ if (!user || !user.username) {
     setOthersAmount(editData.service?.othersAmount || "");
     setOthersItems(editData.service?.othersItems || []);
     setIncome(editData.service?.income || "");
-    // ✅ NEW — load incomeDate + baseline for change-detection
+    // ✅ load incomeDate + baseline for change-detection
     setIncomeDate(
       editData.service?.incomeDate
         ? new Date(editData.service.incomeDate).toISOString().slice(0, 10)
         : ""
     );
+    setIncomeDateTouched(false); // ✅ reset — opening an existing sheet is not a "manual pick"
     initialIncomeRef.current = Number(editData.service?.income || 0);
     setPaymentMode(editData.service?.paymentMode || "");
     setRepairDate(editData.service?.repairDate?.slice(0, 10) || today);
@@ -1180,7 +1272,8 @@ if (!user || !user.username) {
                             touched.customerName && !formErrors.customerName ? "is-valid" : ""
                           }`}
                         inputProps={{
-                          onBlur: () => handleBlur("customerName", customerName)
+                          onBlur: () => handleBlur("customerName", customerName),
+                          spellCheck: true // ✅ NEW — free browser spellcheck (red underline + right-click suggestions)
                         }}
                       />
                       </Field>
@@ -1243,6 +1336,7 @@ if (!user || !user.username) {
                         placeholder="Address"
                         value={address}
                         onChange={(e) => setAddress(e.target.value)}
+                        spellCheck="true"
                       />
                       </Field>
                     </div>
@@ -1315,6 +1409,7 @@ if (!user || !user.username) {
                         }}
                         placeholder="Search "
                         isClearable
+                        filterOption={fuzzyFilterOption}
                         styles={{
                           ...selectCompactText,
                           menuPortal: (base) => ({ ...base, zIndex: 9999 }),
@@ -1334,6 +1429,7 @@ if (!user || !user.username) {
                             value={customMake}
                             onChange={(e) => setCustomMake(e.target.value)}
                             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAddCustomMake(); } }}
+                            spellCheck="true"
                           />
                           <button
                             type="button"
@@ -1359,6 +1455,7 @@ if (!user || !user.username) {
                         }}
                         placeholder="Search"
                         isClearable
+                        filterOption={fuzzyFilterOption}
                         styles={{
                           ...selectCompactText,
                           menuPortal: (base) => ({ ...base, zIndex: 9999 }),
@@ -1377,6 +1474,7 @@ if (!user || !user.username) {
                             value={customModel}
                             onChange={(e) => setCustomModel(e.target.value)}
                             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAddCustomModel(); } }}
+                            spellCheck="true"
                           />
                           <button
                             type="button"
@@ -1510,6 +1608,7 @@ if (!user || !user.username) {
                               const val = e.target.value.replace(/[^a-zA-Z\u0B80-\u0BFF\s.]/g, "");
                               setDealer(val);
                             }}
+                            spellCheck="true"
                           />
                         </Field>
                       </div>
@@ -1611,19 +1710,57 @@ if (!user || !user.username) {
                     </div>
                     <div className="card-body row g-2" style={{ padding: "8px 12px" }}>
 
+                      {/* ================= INCOME ₹ + INCOME DATE — merged into one box (NEW) =================
+                          Was two separate fields (Income ₹ / Income Date). Now a single
+                          form-control-styled box: the amount input sits on the left and a
+                          calendar icon sits in the right corner. Clicking the icon opens the
+                          native date picker (showPicker()) so the date is picked without a
+                          second box taking up a whole grid column. */}
                       <div className="col-md-6">
                         <Field label="Income ₹">
-                          <input
-                            className="form-control form-control-sm"
-                            placeholder="0"
-                            value={income}
-                            onChange={(e) => setIncome(onlyNumbers(e.target.value))}
-                          />
+                          <div
+                            className="form-control form-control-sm d-flex align-items-center"
+                            style={{ padding: "0 6px", gap: 6, position: "relative" }}
+                          >
+                            <input
+                              type="text"
+                              placeholder="0"
+                              value={income}
+                              onChange={(e) => setIncome(onlyNumbers(e.target.value))}
+                              style={{
+                                border: "none", outline: "none", flex: 1, minWidth: 0,
+                                background: "transparent", padding: "4px 2px",
+                                color: "#111827", fontWeight: 500,
+                              }}
+                            />
+                            <Calendar
+                              size={15}
+                              style={{ color: incomeDate ? "#0d6efd" : "#6B7280", cursor: "pointer", flexShrink: 0 }}
+                              onClick={() => {
+                                const el = incomeDateRef.current;
+                                if (el?.showPicker) el.showPicker();
+                                else el?.focus();
+                              }}
+                            />
+                            <input
+                              ref={incomeDateRef}
+                              type="date"
+                              value={incomeDate}
+                              onChange={(e) => {
+                                setIncomeDate(e.target.value);
+                                setIncomeDateTouched(true); // user manually chose → this wins
+                              }}
+                              style={{
+                                position: "absolute", top: 0, right: 0,
+                                width: 1, height: 1, opacity: 0,
+                                border: "none", padding: 0, pointerEvents: "none",
+                              }}
+                            />
+                          </div>
                         </Field>
-                        {/* ✅ NEW — shows the date this income was recorded (used by Income Report) */}
                         {incomeDate && (
                           <div style={{ fontSize: 10, color: "#0d6efd", marginTop: 2, fontWeight: 500 }}>
-                            📅 Income recorded on {incomeDate}
+                            📅 {incomeDateTouched ? "Manually selected" : "Auto-recorded"}: {incomeDate}
                           </div>
                         )}
                       </div>
@@ -1716,6 +1853,7 @@ if (!user || !user.username) {
                             value={remarks}
                             onChange={(e) => setRemarks(e.target.value)}
                             style={{ height: "31px", resize: "none" }}
+                            spellCheck="true"
                           />
                         </Field>
                       </div>
@@ -1766,6 +1904,7 @@ if (!user || !user.username) {
                         }}
                         placeholder="Search Issue..."
                         isClearable
+                        filterOption={fuzzyFilterOption}
                         menuPortalTarget={document.body}
                         styles={{
                           ...selectDarkText,
@@ -1789,6 +1928,7 @@ if (!user || !user.username) {
                               updateIssue(i, val);
                             }}
                             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAddCustomFault(i); } }}
+                            spellCheck="true"
                           />
                           <button
                             type="button"
@@ -1844,6 +1984,7 @@ if (!user || !user.username) {
                     onChange={(selected) => setPhysicalCondition(selected ? selected.map(s => s.value) : [])}
                     placeholder="Select Physical"
                     isClearable
+                    filterOption={fuzzyFilterOption}
                     menuPortalTarget={document.body}
                     styles={{
                       ...selectDarkText,
@@ -1859,6 +2000,7 @@ if (!user || !user.username) {
                         value={customPhysicalConditionText}
                         onChange={(e) => setCustomPhysicalConditionText(e.target.value)}
                         onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAddCustomPhysicalCondition(); } }}
+                        spellCheck="true"
                       />
                       <button
                         type="button"
@@ -1888,6 +2030,7 @@ if (!user || !user.username) {
                     onChange={(selected) => setAccessories(selected ? selected.map(s => s.value) : [])}
                     placeholder="Select Accessories..."
                     isClearable
+                    filterOption={fuzzyFilterOption}
                     menuPortalTarget={document.body}
                     styles={{
                       ...selectDarkText,
@@ -1903,6 +2046,7 @@ if (!user || !user.username) {
                         value={customAccessoryText}
                         onChange={(e) => setCustomAccessoryText(e.target.value)}
                         onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAddCustomAccessory(); } }}
+                        spellCheck="true"
                       />
                       <button
                         type="button"
@@ -1958,6 +2102,7 @@ if (!user || !user.username) {
                       value={cancelRemarksInput}
                       onChange={(e) => setCancelRemarksInput(e.target.value)}
                       autoFocus
+                      spellCheck="true"
                     />
                   </div>
                   <div className="modal-footer">
