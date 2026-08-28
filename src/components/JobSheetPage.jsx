@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from "react";
 import AdvancePopup from "./AdvancePopup";
 import axios from "axios";
-import makeModelData from "../data/makeModelData";
 import JobSheetSearchModal from "./JobSheetSearchModal";
 import SparePopup from "./SparePopup";
 import OthersPopup from "./OthersPopup";
@@ -13,7 +12,8 @@ import { useNavigate } from "react-router-dom";
 import {
   FileText, Save, RefreshCw, Calculator, Receipt, Home, Plus, Ban,
   Menu, Bell, Bandage, Gift, User, Smartphone, Wrench, Eye,
-  Instagram, Star, Package, Wallet, ThumbsUp, X, Calendar
+  Instagram, Star, Package, Wallet, ThumbsUp, X, Calendar, MessageCircle,
+  Clock, Cog, CheckCircle2, IndianRupee, AlertCircle, AlertTriangle, Info
 } from "lucide-react";
 
 const isValidEmail = (email) =>
@@ -25,7 +25,7 @@ const isRequired = (value) => value && value.toString().trim().length > 0;
 
 const onlyNumbers = (value) => value.replace(/\D/g, "");
 
-/* ================= FREE TYPO-TOLERANT FUZZY SEARCH (NEW) =================
+/* ================= FREE TYPO-TOLERANT FUZZY SEARCH =================
    No API/cost — plain Levenshtein edit-distance. Used as a custom filterOption for the
    Make / Model / Fault / Physical Condition / Accessories react-select dropdowns so a typo
    like "Semsung" still finds "Samsung" in the master list. Since the user still has to PICK
@@ -78,7 +78,7 @@ const sideBtnBase = {
   color: "#fff",
 };
 
-/* ================= FIELD LABEL — persistent label above every input (NEW) =================
+/* ================= FIELD LABEL — persistent label above every input =================
    Fixes: once a value is typed, the placeholder disappears and the user can no longer tell
    which field they're looking at (e.g. Income vs Service Charges). A small permanent label
    above the field solves this for new/first-time users at a new store. */
@@ -105,7 +105,121 @@ const Field = ({ label, required, children }) => (
   </div>
 );
 
-/* ================= BOTTOM ACTION BAR — SOLID COLORFUL BUTTONS (NEW) ================= */
+/* ================= MODERN FIELD VALIDATION MESSAGES =================
+   Replaces the old plain "⚠️ Customer Name is required" text with a small pill-style
+   message that has an icon, a soft background, and a gentle slide/fade-in animation so
+   it doesn't just "pop" into existence. Used everywhere formErrors used to be rendered
+   directly. FieldSuccess is the green equivalent for "✅ looks good" states. */
+const FieldError = ({ children }) => (
+  <div
+    style={{
+      display: "flex",
+      alignItems: "flex-start",
+      gap: 6,
+      marginTop: 5,
+      padding: "4px 8px",
+      borderRadius: 6,
+      background: "#FEF2F2",
+      border: "1px solid #FECACA",
+      animation: "fieldMsgIn 0.18s ease",
+    }}
+  >
+    <AlertCircle size={13} color={RED_TEXT} style={{ flexShrink: 0, marginTop: 1 }} />
+    <span style={{ fontSize: 11.5, color: RED_TEXT, fontWeight: 600, lineHeight: 1.3 }}>
+      {children}
+    </span>
+  </div>
+);
+
+const FieldSuccess = ({ children }) => (
+  <div
+    style={{
+      display: "flex",
+      alignItems: "center",
+      gap: 6,
+      marginTop: 5,
+      animation: "fieldMsgIn 0.18s ease",
+    }}
+  >
+    <CheckCircle2 size={13} color="#16A34A" style={{ flexShrink: 0 }} />
+    <span style={{ fontSize: 11.5, color: "#16A34A", fontWeight: 600 }}>{children}</span>
+  </div>
+);
+
+/* ================= MODERN TOAST NOTIFICATIONS =================
+   Drop-in replacement for every window.alert(...) call in this page. Toasts stack in the
+   top-right corner, auto-dismiss after ~4s, can be clicked away early, and are styled per
+   type (success / error / warning / info) instead of the browser's plain alert box.
+   Usage: showToast("Job Sheet Saved", "success") */
+const TOAST_STYLES = {
+  success: { accent: "#16A34A", bg: "#F0FDF4", icon: CheckCircle2 },
+  error: { accent: "#DC2626", bg: "#FEF2F2", icon: AlertCircle },
+  warning: { accent: "#D97706", bg: "#FFFBEB", icon: AlertTriangle },
+  info: { accent: "#2563EB", bg: "#EFF6FF", icon: Info },
+};
+
+const Toast = ({ toast, onDismiss }) => {
+  const cfg = TOAST_STYLES[toast.type] || TOAST_STYLES.info;
+  const Icon = cfg.icon;
+  return (
+    <div
+      onClick={() => onDismiss(toast.id)}
+      role="alert"
+      style={{
+        display: "flex",
+        alignItems: "flex-start",
+        gap: 10,
+        minWidth: 280,
+        maxWidth: 380,
+        background: "#fff",
+        borderLeft: `4px solid ${cfg.accent}`,
+        borderRadius: 10,
+        padding: "12px 14px",
+        boxShadow: "0 10px 30px rgba(0,0,0,0.14), 0 2px 6px rgba(0,0,0,0.08)",
+        cursor: "pointer",
+        animation: "toastIn 0.28s cubic-bezier(0.22, 1, 0.36, 1)",
+      }}
+    >
+      <div
+        style={{
+          width: 26, height: 26, borderRadius: "50%", background: cfg.bg,
+          display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+        }}
+      >
+        <Icon size={15} color={cfg.accent} />
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div
+          style={{
+            fontSize: 13, fontWeight: 600, color: "#111827",
+            lineHeight: 1.45, whiteSpace: "pre-line", wordBreak: "break-word",
+          }}
+        >
+          {toast.message}
+        </div>
+      </div>
+      <X size={14} color="#9CA3AF" style={{ flexShrink: 0, marginTop: 2 }} />
+    </div>
+  );
+};
+
+const ToastContainer = ({ toasts, onDismiss }) => (
+  <div
+    style={{
+      position: "fixed", top: 16, right: 16, zIndex: 999999,
+      display: "flex", flexDirection: "column", gap: 10,
+      pointerEvents: "none",
+    }}
+  >
+    {toasts.map((t) => (
+      <div key={t.id} style={{ pointerEvents: "auto" }}>
+        <Toast toast={t} onDismiss={onDismiss} />
+      </div>
+    ))}
+  </div>
+);
+
+/* ================= BOTTOM ACTION BAR — SOLID COLORFUL BUTTONS ================= */
 const sideBtnSave = { ...sideBtnBase, background: "#DC2626" };       // Save / Update — red
 const sideBtnRefresh = { ...sideBtnBase, background: "#475569" };    // Refresh — slate
 const sideBtnEstimate = { ...sideBtnBase, background: "#2563EB" };   // Estimate — blue
@@ -114,6 +228,7 @@ const sideBtnHome = { ...sideBtnBase, background: "#0D9488" };       // Home —
 const sideBtnNew = { ...sideBtnBase, background: "#16A34A" };        // New — green
 const sideBtnCancel = { ...sideBtnBase, background: "#991B1B" };     // Cancel — dark red
 const sideBtnRebill = { ...sideBtnBase, background: "#D97706" };     // Rebill — amber
+const sideBtnWhatsApp = { ...sideBtnBase, background: "#25D366" };   // Send WhatsApp — WhatsApp green (NEW)
 
 const redHeader = {
   background: RED_SOFT_BG, color: RED_TEXT, fontWeight: 700,
@@ -121,14 +236,14 @@ const redHeader = {
   padding: "6px 12px", fontSize: 13
 };
 
-/* ================= YELLOW HEADER — DARKENED (UPDATED) ================= */
+/* ================= YELLOW HEADER — DARKENED ================= */
 const yellowHeader = {
   background: "#FDE68A", color: "#7C2D12", fontWeight: 700,
   borderBottom: "1px solid #F59E0B", letterSpacing: 0.2,
   padding: "6px 12px", fontSize: 13
 };
 
-/* ================= REACT-SELECT DARK TEXT STYLES (NEW) ================= */
+/* ================= REACT-SELECT DARK TEXT STYLES ================= */
 const selectDarkText = {
   control: (base) => ({ ...base, minHeight: 31, borderColor: "#CBD5E1" }),
   placeholder: (base) => ({ ...base, color: "#6B7280", fontWeight: 400 }),
@@ -143,7 +258,7 @@ const selectDarkText = {
   multiValueLabel: (base) => ({ ...base, color: "#111827", fontWeight: 500 }),
 };
 
-/* ================= COMPACT SELECT — fixed short height, single-line text (NEW) =================
+/* ================= COMPACT SELECT — fixed short height, single-line text =================
    Used for single-value dropdowns (Make, Model) where the placeholder/value should stay on
    one line instead of wrapping and stretching the field taller than the inputs beside it. */
 const selectCompactText = {
@@ -162,6 +277,33 @@ const selectCompactText = {
   }),
 };
 
+/* ================= TOP STATS CARD — Pending / In Process / Delivered / Revenue =================
+   Small dashboard-style cards shown above the Job Sheet Info Bar (same idea as an admin
+   summary strip). Counts come from ALL job sheets (via /api/jobsheets/filter), not just the
+   one currently open on this page — so opening/editing a single Job Sheet still shows the
+   shop-wide totals. Cancelled job sheets are excluded from every count. */
+const statCardWrap = {
+  borderRadius: 10, padding: "8px 10px", display: "flex",
+  flexDirection: "row", alignItems: "center", gap: 8, height: "100%",
+};
+
+const StatCard = ({ label, value, icon, bg }) => (
+  <div className="col-6 col-md">
+    <div className="card shadow-sm" style={statCardWrap}>
+      <div style={{
+        width: 30, height: 30, borderRadius: "50%", background: bg,
+        display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0
+      }}>
+        {icon}
+      </div>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 10.5, color: "#6B7280", fontWeight: 600, whiteSpace: "nowrap" }}>{label}</div>
+        <div style={{ fontSize: 15, fontWeight: 700, color: "#111827", whiteSpace: "nowrap" }}>{value}</div>
+      </div>
+    </div>
+  </div>
+);
+
 const JobSheetPage = ({ editData = null, isEdit = false }) => {
   const [makeList, setMakeList] = useState([]);
   const [modelList, setModelList] = useState([]);
@@ -176,9 +318,63 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelRemarksInput, setCancelRemarksInput] = useState("");
   const [cancelling, setCancelling] = useState(false);
-  /* ================= VALIDATION (NEW) ================= */
+
+  /* ================= TOAST NOTIFICATIONS =================
+     Replaces every window.alert(...) in this file. Call showToast("message", "success" |
+     "error" | "warning" | "info"). Auto-dismisses after 4s; click a toast to dismiss early. */
+  const [toasts, setToasts] = useState([]);
+  const showToast = (message, type = "info") => {
+    const id = Date.now() + Math.random();
+    setToasts((prev) => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 4000);
+  };
+  const dismissToast = (id) => setToasts((prev) => prev.filter((t) => t.id !== id));
+
+  /* ================= TOP STATS (Pending / In Process / Delivered / Revenue) =================
+     "In Process" = Device Status "Repaired" (mudinjuchu, innum deliver pannala).
+     Total Revenue = sum of service.income across all non-cancelled job sheets.
+     Change this mapping below if unga "In Process" vera status-ah irundha (e.g. Received). */
+  const [jobStats, setJobStats] = useState({ total: 0, pending: 0, inProcess: 0, delivered: 0, totalRevenue: 0 });
+  const [statsLoading, setStatsLoading] = useState(false);
+
+  const fetchJobStats = () => {
+    setStatsLoading(true);
+    axios.get(`${API}/api/jobsheets/filter`)
+      .then((res) => {
+        const all = res.data || [];
+        // Total = ella job sheets-um (cancelled-um serthu), AllReportPage-oda "Total Records" madhiri
+        const total = all.length;
+        let pending = 0, inProcess = 0, delivered = 0, totalRevenue = 0;
+        all.forEach((js) => {
+          if (js.isCancelled) return; // cancelled jobs status-counts + revenue-la skip
+          const status = js.device?.mobileStatus;
+          if (status === "Pending") pending++;
+          else if (status === "Repaired") inProcess++;
+          else if (status === "Delivered" || status === "Delivered NR/NA") delivered++;
+          totalRevenue += Number(js.service?.income || 0);
+        });
+        setJobStats({ total, pending, inProcess, delivered, totalRevenue });
+      })
+      .catch((err) => console.error("Job stats fetch error:", err))
+      .finally(() => setStatsLoading(false));
+  };
+
+  useEffect(() => {
+    fetchJobStats();
+  }, []);
+
+  /* ================= VALIDATION ================= */
   const [touched, setTouched] = useState({});
   const [formErrors, setFormErrors] = useState({});
+
+  /* ================= DEAD PHONE FLAG (NEW) =================
+     IMEI is now mandatory — but a dead phone has no readable IMEI. Checking this box
+     disables the IMEI input, skips its "required" validation, and saves the device's
+     imei value as "DEAD" instead. Loading an existing job sheet re-derives this flag
+     from a saved imei of "DEAD". */
+  const [isDeadPhone, setIsDeadPhone] = useState(false);
 
   const validateField = (name, value) => {
     switch (name) {
@@ -195,6 +391,19 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
         if (!value || value.toString().trim() === "") return "";
         return !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) ? "Invalid email format" : "";
 
+      case "district":
+        return !value || !value.toString().trim() ? "District is required" : "";
+
+      case "taluk":
+        return !value || !value.toString().trim() ? "Taluk is required" : "";
+
+      // ================= IMEI — mandatory unless Dead Phone is checked =================
+      case "imei":
+        if (isDeadPhone) return "";
+        if (!value || !value.toString().trim()) return "IMEI Number is required";
+        if (!/^\d{15}$/.test(value)) return "Must be exactly 15 digits";
+        return "";
+
       default:
         return "";
     }
@@ -205,18 +414,37 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
     setFormErrors(prev => ({ ...prev, [name]: validateField(name, value) }));
   };
 
+  /* ================= LIVE CHANGE HANDLER (FIX) =================
+     🔴 BUG FIX: Customer Name & Contact No fields were calling handleLiveChange(...) in
+     their onChange, but that function was never defined anywhere in the file — so every
+     keystroke threw "handleLiveChange is not defined" and React never updated the state,
+     which is why typing looked completely dead in those two fields. This defines it:
+     it updates the field via the given setter AND — only if the field has already been
+     "touched" (blurred once) — re-runs validation live as you type, so an error message
+     can clear itself the moment the value becomes valid instead of waiting for blur again. */
+  const handleLiveChange = (name, value, setter) => {
+    setter(value);
+    if (touched[name]) {
+      setFormErrors(prev => ({ ...prev, [name]: validateField(name, value) }));
+    }
+  };
+
   const validateAll = () => {
     const errors = {
       customerName: validateField("customerName", customerName),
       contact: validateField("contact", contact),
       email: validateField("email", email),
+      district: validateField("district", district),
+      taluk: validateField("taluk", taluk),
+      imei: validateField("imei", imei),
     };
     setFormErrors(errors);
-    setTouched({ customerName: true, contact: true, email: true });
+    setTouched({ customerName: true, contact: true, email: true, district: true, taluk: true, imei: true });
 
     const errorMessages = Object.values(errors).filter(Boolean);
     if (errorMessages.length > 0) {
-      alert("⚠️ Please fix before Update/Save:\n\n" + errorMessages.join("\n"));
+      // Modern toast instead of window.alert — shows every field that needs fixing in one card.
+      showToast("Please fix before Update/Save:\n" + errorMessages.map(m => `• ${m}`).join("\n"), "error");
       return false;
     }
     return true;
@@ -263,12 +491,36 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
   const [othersItems, setOthersItems] = useState([]);
   const [showOthersPopup, setShowOthersPopup] = useState(false);
 
-  /* ================= CUSTOMER ================= */
+  /* ================= CUSTOMER =================
+     🔴 REMOVED: "address" field (state + UI + payload) removed entirely per request —
+     Customer Address is no longer captured anywhere on the Job Sheet. */
   const [customerName, setCustomerName] = useState("");
   const [contact, setContact] = useState("");
   const [altContact, setAltContact] = useState("");
-  const [address, setAddress] = useState("");
   const [email, setEmail] = useState("");
+  // District / Taluk — mandatory, MD sir Excel download-la district & taluk wise filter pananum-nu kekkittaru
+  const [district, setDistrict] = useState("");
+  const [taluk, setTaluk] = useState("");
+
+  /* ================= DISTRICT / TALUK — backend-driven =================
+     Master lists live in Mongo (District / Taluk collections), managed from the sidebar's
+     "Data Operation" → District/Taluk popup (add/edit/delete) — NOT inline here. Job Sheet
+     just fetches and shows whatever's in the DB, exactly like Engineer/Drawer/Sales Rep. */
+  const [districtList, setDistrictList] = useState([]);
+  const [talukList, setTalukList] = useState([]);
+
+  useEffect(() => {
+    axios.get(`${API}/api/districts`)
+      .then(res => setDistrictList(res.data))
+      .catch(err => console.error("District fetch error:", err));
+  }, []);
+
+  useEffect(() => {
+    if (!district) { setTalukList([]); return; }
+    axios.get(`${API}/api/taluks/${district}`)
+      .then(res => setTalukList(res.data))
+      .catch(err => { console.error("Taluk fetch error:", err); setTalukList([]); });
+  }, [district]);
 
 
   /* ================= DEVICE ================= */
@@ -313,7 +565,7 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
   const [visualIssues, setVisualIssues] = useState([""]);
   const [faultList, setFaultList] = useState([]);
 
-  /* ================= PHYSICAL CONDITION / ACCESSORIES — now backend-driven (NEW) =================
+  /* ================= PHYSICAL CONDITION / ACCESSORIES — backend-driven =================
      Master lists live in Mongo (PhysicalCondition / Accessory collections) instead of being
      hardcoded here. Picking "Others (Add New)" and typing a name POSTs it to the backend so
      it appears in the dropdown for every future job sheet, not just this one. */
@@ -324,7 +576,7 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
   const [addingPhysicalCondition, setAddingPhysicalCondition] = useState(false);
   const [addingAccessory, setAddingAccessory] = useState(false);
 
-  /* ================= MAKE / MODEL / FAULT — Add-New now backend-driven too (NEW) =================
+  /* ================= MAKE / MODEL / FAULT — Add-New backend-driven too =================
      Same problem as Physical Condition/Accessories used to have: typing a new Make, Model, or
      Visual Issue (Fault) only saved it on THIS job sheet's own fields — nothing was POSTed to
      /api/makes, /api/models, or /api/faults, so the master dropdown list never grew and the
@@ -377,7 +629,7 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
       setCustomPhysicalConditionText("");
     } catch (err) {
       console.error(err);
-      alert("Failed to add physical condition ❌");
+      showToast("Failed to add physical condition", "error");
     } finally {
       setAddingPhysicalCondition(false);
     }
@@ -400,13 +652,13 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
       setCustomAccessoryText("");
     } catch (err) {
       console.error(err);
-      alert("Failed to add accessory ❌");
+      showToast("Failed to add accessory", "error");
     } finally {
       setAddingAccessory(false);
     }
   };
 
-  /* ================= ADD NEW MAKE (NEW) =================
+  /* ================= ADD NEW MAKE =================
      Mirrors handleAddCustomPhysicalCondition — POSTs to /api/makes (makeRoutes.js already
      supports this), pushes the new Make into makeList so the Select dropdown has it right
      away, and switches `make` from "__custom" to the real saved name. */
@@ -425,13 +677,13 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
       setCustomMake("");
     } catch (err) {
       console.error(err);
-      alert(err.response?.data?.message || "Failed to add make ❌");
+      showToast(err.response?.data?.message || "Failed to add make", "error");
     } finally {
       setAddingMake(false);
     }
   };
 
-  /* ================= ADD NEW MODEL (NEW) =================
+  /* ================= ADD NEW MODEL =================
      Mirrors handleAddCustomMake — POSTs to /api/models with { name, make }, since modelRoutes.js
      requires both fields. Uses whichever Make is currently selected (or the just-typed custom
      Make) so the new Model is correctly linked. */
@@ -440,7 +692,7 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
     if (!val) return;
     const selectedMake = make === "__custom" ? customMake : make;
     if (!selectedMake) {
-      alert("⚠️ Select or Add a Make first");
+      showToast("Select or Add a Make first", "warning");
       return;
     }
     setAddingModel(true);
@@ -455,13 +707,13 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
       setCustomModel("");
     } catch (err) {
       console.error(err);
-      alert(err.response?.data?.message || "Failed to add model ❌");
+      showToast(err.response?.data?.message || "Failed to add model", "error");
     } finally {
       setAddingModel(false);
     }
   };
 
-  /* ================= ADD NEW FAULT / VISUAL ISSUE (NEW) =================
+  /* ================= ADD NEW FAULT / VISUAL ISSUE =================
      Mirrors handleAddCustomAccessory — POSTs to /api/faults so the fault master list
      (faultList) grows, then swaps this row's custom text input back to a normal selected
      value. */
@@ -484,7 +736,7 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
       updateIssue(i, newFault.name);
     } catch (err) {
       console.error(err);
-      alert(err.response?.data?.message || "Failed to add fault ❌");
+      showToast(err.response?.data?.message || "Failed to add fault", "error");
     } finally {
       setAddingFault(prev => ({ ...prev, [i]: false }));
     }
@@ -508,30 +760,16 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
     );
   };
 
-
-  useEffect(() => {
-    axios.get(`${API}/api/engineers`)
-      .then(res => setEngineerList(res.data));
-  }, []);
-
-  useEffect(() => {
-    axios.get(`${API}/api/jobsheets/workload`)
-      .then(res => {
-        const map = {};
-        res.data.forEach(e => { map[e.name] = e.activeJobs; });
-        setWorkloadMap(map);
-      })
-      .catch(err => console.error("Workload fetch error:", err));
-  }, []);
   /* ================= SERVICE ================= */
   const today = new Date().toISOString().split("T")[0];
   const [engineer, setEngineer] = useState("");
-
   const [engineerList, setEngineerList] = useState([]);
 
+  // NOTE: this was previously fetched twice (duplicate useEffect) — merged into one.
   useEffect(() => {
     axios.get(`${API}/api/engineers`)
-      .then(res => setEngineerList(res.data));
+      .then(res => setEngineerList(res.data))
+      .catch(err => console.error("Engineer fetch error:", err));
   }, []);
 
   const [dealer, setDealer] = useState("");
@@ -543,7 +781,7 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
       .then(res => setDrawerList(res.data));
   }, []);
 
-  /* ================= LIVE MASTER-LIST REFRESH (NEW) =================
+  /* ================= LIVE MASTER-LIST REFRESH =================
      Fault/Make/Model/Drawer master lists can also be edited from the sidebar's "Data
      Operation" popups (FaultPopup, AdminMakeModal, AdminModelModal, DrawerPopup). Those popups
      are just an overlay on top of THIS page — no navigation/remount happens — so JobSheetPage's
@@ -574,19 +812,34 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
         .then(res => setDrawerList(res.data))
         .catch(err => console.error("Drawer refetch error:", err));
     };
+    const refetchDistricts = () => {
+      axios.get(`${API}/api/districts`)
+        .then(res => setDistrictList(res.data))
+        .catch(err => console.error("District refetch error:", err));
+    };
+    const refetchTaluks = () => {
+      if (!district) return;
+      axios.get(`${API}/api/taluks/${district}`)
+        .then(res => setTalukList(res.data))
+        .catch(err => console.error("Taluk refetch error:", err));
+    };
 
     window.addEventListener("faultListUpdated", refetchFaults);
     window.addEventListener("makeListUpdated", refetchMakes);
     window.addEventListener("modelListUpdated", refetchModels);
     window.addEventListener("drawerListUpdated", refetchDrawers);
+    window.addEventListener("districtListUpdated", refetchDistricts);
+    window.addEventListener("talukListUpdated", refetchTaluks);
 
     return () => {
       window.removeEventListener("faultListUpdated", refetchFaults);
       window.removeEventListener("makeListUpdated", refetchMakes);
       window.removeEventListener("modelListUpdated", refetchModels);
       window.removeEventListener("drawerListUpdated", refetchDrawers);
+      window.removeEventListener("districtListUpdated", refetchDistricts);
+      window.removeEventListener("talukListUpdated", refetchTaluks);
     };
-  }, [make, customMake]);
+  }, [make, customMake, district]);
 
   const [serviceCharge, setServiceCharge] = useState("");
   const [spareCharge, setSpareCharge] = useState("");
@@ -596,16 +849,16 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
 
   const [paymentMode, setPaymentMode] = useState("");
   const [income, setIncome] = useState("");
-  // ✅ tracks the date Income was last actually changed & saved.
+  // tracks the date Income was last actually changed & saved.
   // Income Report groups by this date, NOT repairDate, so income shows up
   // in the month it was actually entered (e.g. delivered/collected month).
   const [incomeDate, setIncomeDate] = useState("");
 
-  // ✅ NEW — true only when the USER manually picked a date in the Income Date field.
+  // true only when the USER manually picked a date in the Income Date field.
   // If false, the date is auto-managed (today's date when Income changes).
   const [incomeDateTouched, setIncomeDateTouched] = useState(false);
 
-  // ================= INCOME + INCOME DATE MERGED FIELD (NEW) =================
+  // ================= INCOME + INCOME DATE MERGED FIELD =================
   // Ref to the (visually hidden) native date input that lives inside the Income ₹ box.
   // Clicking the calendar icon opens it via showPicker() so Income amount and Income
   // Date share a single box instead of two separate fields.
@@ -622,7 +875,7 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
   const [showAdvancePopup, setShowAdvancePopup] = useState(false);
   const [margin, setMargin] = useState("");
 
-  /* ================= AUTO-CALCULATE SERVICE CHARGE (NEW) =================
+  /* ================= AUTO-CALCULATE SERVICE CHARGE =================
      Service Charge (labour) = Income - Spare Charges - Other Expenses.
      This field is now READ-ONLY and always reflects the remaining amount
      after spare parts & other expenses are deducted from the total income. */
@@ -663,7 +916,7 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
   /* ================= CANCEL ================= */
   const handleCancel = async () => {
     if (!cancelRemarksInput.trim()) {
-      alert("Please enter cancel reason");
+      showToast("Please enter cancel reason", "warning");
       return;
     }
     setCancelling(true);
@@ -680,30 +933,53 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
       setLocalEditData(res.data);
       setShowCancelModal(false);
       setCancelRemarksInput("");
-      alert("Job Sheet Cancelled ✅");
+      showToast("Job Sheet Cancelled", "success");
+      fetchJobStats(); // status maarina odane top stats refresh aagum
     } catch (err) {
       console.error(err);
-      alert(err.response?.data?.message || "Cancel failed ❌");
+      showToast(err.response?.data?.message || "Cancel failed", "error");
     } finally {
       setCancelling(false);
     }
   };
+
+  /* ================= SEND WHATSAPP (NEW) =================
+     Manual re-send of the current Device Status message. Hits a dedicated backend
+     endpoint (POST /api/jobsheets/:id/send-whatsapp) which looks up the job's current
+     customer + status and fires sendJobStatusWhatsApp() itself — so this button always
+     sends whatever status is currently SAVED in the DB, not whatever is unsaved in the
+     form. If there are unsaved changes, prompt the user to Update first. */
+  const [sendingWhatsApp, setSendingWhatsApp] = useState(false);
+  const handleSendWhatsApp = async () => {
+    if (!localEditData?._id) {
+      showToast("Please save Job Sheet first", "warning");
+      return;
+    }
+    setSendingWhatsApp(true);
+    try {
+      const res = await axios.post(`${API}/api/jobsheets/${localEditData._id}/send-whatsapp`);
+      showToast(res.data?.message || "WhatsApp message sent", "success");
+    } catch (err) {
+      console.error(err);
+      showToast(err.response?.data?.message || "Failed to send WhatsApp message", "error");
+    } finally {
+      setSendingWhatsApp(false);
+    }
+  };
+
   /* ================= UPDATE ================= */
   const handleUpdate = async () => {
-    console.log("=== DEBUG ===");
-    console.log("advanceDate:", advanceDate);
-    console.log("advanceAmount:", advanceAmount);
-
     if (!validateAll()) { window.scrollTo({ top: 0, behavior: "smooth" }); return; }
     if (repairDate && deliveryDate && new Date(deliveryDate) < new Date(repairDate)) {
-      alert("⚠️ Delivery Date cannot be before Repair Date"); return;
+      showToast("Delivery Date cannot be before Repair Date", "warning");
+      return;
     }
 
-    // ✅ Income date logic (priority order):
+    // Income date logic (priority order):
     //   1. If user manually picked a date in the Income Date field → use that, always.
     //   2. Else if Income amount actually changed this session → auto-stamp today.
     //   3. Else keep whatever incomeDate already existed (or today if none yet).
-       const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = new Date().toISOString().slice(0, 10);
     const incomeNum = Number(income || 0);
     const finalIncomeDate = incomeNum > 0
       ? (incomeDate || todayStr)
@@ -711,8 +987,8 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
     try {
       const formData = new FormData();
       formData.append("jobSheetNo", jobSheetNo);
-      formData.append("customer", JSON.stringify({ name: customerName, contact, altContact, address, email }));
-      formData.append("device", JSON.stringify({ make: make === "__custom" ? customMake : make, model: model === "__custom" ? customModel : model, imei, warranty, pattern, mobileStatus }));
+      formData.append("customer", JSON.stringify({ name: customerName, contact, altContact, email, district, taluk }));
+      formData.append("device", JSON.stringify({ make: make === "__custom" ? customMake : make, model: model === "__custom" ? customModel : model, imei: isDeadPhone ? "DEAD" : imei, warranty, pattern, mobileStatus }));
       formData.append("physicalCondition", JSON.stringify(physicalCondition.filter(v => v !== "__custom")));
       formData.append("accessories", JSON.stringify(accessories.filter(v => v !== "__custom")));
       formData.append("advanceItems", JSON.stringify(advanceItems));
@@ -723,7 +999,7 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
         serviceCharge: Number(serviceCharge || 0),
         spareCharge: Number(spareCharge || 0),
         income: incomeNum,
-        incomeDate: finalIncomeDate, // ✅
+        incomeDate: finalIncomeDate,
 
         othersAmount: Number(othersAmount || 0),
         othersItems,
@@ -753,15 +1029,16 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
         setAdvanceDate(updatedJob.service.advanceDate.slice(0, 10));
       }
 
-      // ✅ sync incomeDate + baseline after a successful update
+      // sync incomeDate + baseline after a successful update
       setIncomeDate(finalIncomeDate);
       initialIncomeRef.current = incomeNum;
 
-      alert("Job Sheet Updated ✅");
+      showToast("Job Sheet Updated", "success");
+      fetchJobStats(); // status/income maarina odane top stats refresh aagum
 
     } catch (err) {
       console.error(err);
-      alert("Update failed ❌");
+      showToast("Update failed", "error");
     }
   };
 
@@ -776,25 +1053,23 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
       return;
     }
     if (repairDate && deliveryDate && new Date(deliveryDate) < new Date(repairDate)) {
-      alert("⚠️ Delivery Date cannot be before Repair Date");
+      showToast("Delivery Date cannot be before Repair Date", "warning");
       return;
     }
 
     setSaving(true);
 
-   const user = JSON.parse(sessionStorage.getItem("user") || "null");
+    const user = JSON.parse(sessionStorage.getItem("user") || "null");
 
-if (!user || !user.username) {
-  alert("⚠️ Session expired! Please logout and login again, then try saving.");
-  setSaving(false);
-  return;
-}
+    if (!user || !user.username) {
+      showToast("Session expired! Please logout and login again, then try saving.", "error");
+      setSaving(false);
+      return;
+    }
 
-    // ✅ New job sheet: if user manually picked a date, use it; otherwise auto = today
+    // New job sheet: if user manually picked a date, use it; otherwise auto = today
     // (only when Income has a value).
-  
-
-         const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = new Date().toISOString().slice(0, 10);
     const incomeNum = Number(income || 0);
     const finalIncomeDate = incomeNum > 0
       ? (incomeDate || todayStr)
@@ -803,23 +1078,21 @@ if (!user || !user.username) {
     try {
       const formData = new FormData();
       formData.append("jobSheetNo", jobSheetNo);
-      formData.append("customer", JSON.stringify({ name: customerName, contact, altContact, address, email }));
-      formData.append("device", JSON.stringify({ make: make === "__custom" ? customMake : make, model: model === "__custom" ? customModel : model, imei, warranty, pattern, mobileStatus }));
+      formData.append("customer", JSON.stringify({ name: customerName, contact, altContact, email, district, taluk }));
+      formData.append("device", JSON.stringify({ make: make === "__custom" ? customMake : make, model: model === "__custom" ? customModel : model, imei: isDeadPhone ? "DEAD" : imei, warranty, pattern, mobileStatus }));
       formData.append("physicalCondition", JSON.stringify(physicalCondition.filter(v => v !== "__custom")));
       formData.append("accessories", JSON.stringify(accessories.filter(v => v !== "__custom")));
       formData.append("advanceItems", JSON.stringify(advanceItems));
       formData.append("visualIssues", JSON.stringify(visualIssues.filter(Boolean)));
       formData.append("service", JSON.stringify({
         engineer,
-
-
         dealer, drawer, serviceRep,
         instaFollowers,
         googleReview, advanceDate,
         serviceCharge: Number(serviceCharge || 0),
         spareCharge: Number(spareCharge || 0),
         income: incomeNum,
-        incomeDate: finalIncomeDate, // ✅
+        incomeDate: finalIncomeDate,
 
         othersAmount: Number(othersAmount || 0),
         othersItems,
@@ -830,39 +1103,41 @@ if (!user || !user.username) {
       formData.append("spareItems", JSON.stringify(spareItems));
       formData.append("idProofType", idProofType);
       if (idProofImage) formData.append("idProofImage", idProofImage);
-     formData.append("createdBy", JSON.stringify({ username: user.username, role: user.role }));
+      formData.append("createdBy", JSON.stringify({ username: user.username, role: user.role }));
 
       const res = await axios.post(`${API}/api/jobsheets`, formData, {
         headers: { "Content-Type": "multipart/form-data" }
       });
 
-      alert("Job Sheet Saved ✅");
+      showToast("Job Sheet Saved", "success");
+      fetchJobStats(); // puthu job sheet — top stats refresh aagum
 
       const next = await axios.get(`${API}/api/jobsheets/next-number`);
       handleNew(next.data.next);
 
     } catch (err) {
       console.error(err);
-      alert("Save failed ❌");
+      showToast("Save failed", "error");
     } finally {
       setSaving(false);
     }
   };
-  console.log("advanceItems being saved:", advanceItems);
-  console.log("advanceAmount:", advanceAmount);
+
   const handleNew = (nextNo = null) => {
     setCustomerName("");
 
     setContact("");
     setAltContact("");
-    setAddress("");
     setEmail("");
+    setDistrict("");
+    setTaluk("");
     setServiceRep("");
     setMake("");
     setCustomMake("");
     setModel("");
     setCustomModel("");
     setImei("");
+    setIsDeadPhone(false);
     setWarranty("");
     setPattern("");
     setIdProofType("");
@@ -890,7 +1165,7 @@ if (!user || !user.username) {
     setSpareItems([]);
     setIncome("");
     setIncomeDate("");
-    setIncomeDateTouched(false); // ✅ reset manual-pick flag on New
+    setIncomeDateTouched(false); // reset manual-pick flag on New
     initialIncomeRef.current = 0;
     setPaymentMode("");
     setRemarks("");
@@ -920,14 +1195,24 @@ if (!user || !user.username) {
     setCustomerName(editData.customer?.name || "");
     setContact(editData.customer?.contact || "");
     setAltContact(editData.customer?.altContact || "");
-    setAddress(editData.customer?.address || "");
     setEmail(editData.customer?.email || "");
+    setDistrict(editData.customer?.district || "");
+    setTaluk(editData.customer?.taluk || "");
     setServiceRep(editData.service?.serviceRep || "");
     setInstaFollowers(editData.service?.instaFollowers || "");
     setGoogleReview(editData.service?.googleReview || "");
     setMake(editData.device?.make || "");
     setModel(editData.device?.model || "");
-    setImei(editData.device?.imei || "");
+    // ================= DEAD PHONE — restore from saved value =================
+    // If the stored IMEI is literally "DEAD", the checkbox comes back checked and
+    // the visible IMEI input stays blank instead of showing "DEAD" as a value.
+    if (editData.device?.imei === "DEAD") {
+      setIsDeadPhone(true);
+      setImei("");
+    } else {
+      setIsDeadPhone(false);
+      setImei(editData.device?.imei || "");
+    }
     setWarranty(editData.device?.warranty || "");
     setPattern(editData.device?.pattern || "");
     setIdProofType(editData.device?.idProofType || "");
@@ -955,13 +1240,13 @@ if (!user || !user.username) {
     setOthersAmount(editData.service?.othersAmount || "");
     setOthersItems(editData.service?.othersItems || []);
     setIncome(editData.service?.income || "");
-    // ✅ load incomeDate + baseline for change-detection
+    // load incomeDate + baseline for change-detection
     setIncomeDate(
       editData.service?.incomeDate
         ? new Date(editData.service.incomeDate).toISOString().slice(0, 10)
         : ""
     );
-    setIncomeDateTouched(false); // ✅ reset — opening an existing sheet is not a "manual pick"
+    setIncomeDateTouched(false); // reset — opening an existing sheet is not a "manual pick"
     initialIncomeRef.current = Number(editData.service?.income || 0);
     setPaymentMode(editData.service?.paymentMode || "");
     setRepairDate(editData.service?.repairDate?.slice(0, 10) || today);
@@ -1022,7 +1307,7 @@ if (!user || !user.username) {
       setShowSearchModal(true);
     } catch (err) {
       console.error(err);
-      alert("Search failed");
+      showToast("Search failed", "error");
     } finally {
       setSearching(false);
     }
@@ -1061,8 +1346,32 @@ if (!user || !user.username) {
     ...extraModel,
     { label: "Other (Add New)", value: "__custom" }
   ];
-  /* ── WORKLOAD BADGE HELPER ── */
-;
+
+  /* ================= DISTRICT / TALUK OPTIONS =================
+     Plain list straight from the DB — same "extra"-entry fallback as Make/Model so a saved
+     district/taluk from an older job sheet still shows up selected even if it's since been
+     renamed/removed from the master list. No "Other (Add New)" here — District/Taluk are
+     only added/edited/deleted from the sidebar's Data Operation popup. */
+  const districtNames = districtList.map(d => typeof d === "string" ? d : d.name);
+  const extraDistrict =
+    district && !districtNames.includes(district)
+      ? [{ label: district, value: district }]
+      : [];
+  const districtOptions = [
+    ...districtNames.map(name => ({ label: name, value: name })),
+    ...extraDistrict,
+  ];
+
+  const talukNames = talukList.map(t => typeof t === "string" ? t : t.name);
+  const extraTaluk =
+    taluk && !talukNames.includes(taluk)
+      ? [{ label: taluk, value: taluk }]
+      : [];
+  const talukOptions = [
+    ...talukNames.map(name => ({ label: name, value: name })),
+    ...extraTaluk,
+  ];
+
   return (
     <div
       style={{ minHeight: "100vh", background: "#f6f7f9", display: "flex" }}
@@ -1081,7 +1390,7 @@ if (!user || !user.username) {
       }}
     >
 
-      {/* ============ GLOBAL DARK TEXT / PLACEHOLDER STYLES ============ */}
+      {/* ============ GLOBAL DARK TEXT / PLACEHOLDER STYLES + VALIDATION ANIMATIONS ============ */}
       <style>{`
         .form-control, .form-select {
           color: #111827 !important;
@@ -1097,7 +1406,37 @@ if (!user || !user.username) {
         .form-control:disabled, .form-select:disabled {
           color: #6B7280 !important;
         }
+
+        /* Modern invalid/valid field styling — soft glow instead of a hard red box,
+           plus a tiny shake the moment a field becomes invalid so it draws the eye. */
+        .form-control.is-invalid, .form-select.is-invalid {
+          border-color: ${RED} !important;
+          box-shadow: 0 0 0 3px rgba(220,38,38,0.10) !important;
+          animation: fieldShake 0.35s ease;
+        }
+        .form-control.is-valid, .form-select.is-valid {
+          border-color: #16A34A !important;
+          box-shadow: 0 0 0 3px rgba(22,163,74,0.10) !important;
+        }
+
+        @keyframes fieldShake {
+          10%, 90% { transform: translateX(-1px); }
+          20%, 80% { transform: translateX(2px); }
+          30%, 50%, 70% { transform: translateX(-3px); }
+          40%, 60% { transform: translateX(3px); }
+        }
+        @keyframes fieldMsgIn {
+          from { opacity: 0; transform: translateY(-4px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes toastIn {
+          from { opacity: 0; transform: translateX(24px) scale(0.98); }
+          to { opacity: 1; transform: translateX(0) scale(1); }
+        }
       `}</style>
+
+      {/* ============ TOAST NOTIFICATIONS (replaces window.alert everywhere) ============ */}
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
 
       {/* ============ LEFT SIDEBAR ============ */}
       <JobSheetSidebar />
@@ -1144,6 +1483,40 @@ if (!user || !user.username) {
         </div>
 
         <div className="container-fluid" style={{ padding: "14px 18px" }}>
+
+          {/* ============ TOP STATS BAR — Pending / In Process / Delivered / Total Revenue ============ */}
+          <div className="row g-2 mb-2">
+            <StatCard
+              label="Total"
+              value={statsLoading ? "…" : jobStats.total}
+              icon={<FileText size={16} color="#fff" />}
+              bg="#334155"
+            />
+            <StatCard
+              label="Pending"
+              value={statsLoading ? "…" : jobStats.pending}
+              icon={<Clock size={16} color="#fff" />}
+              bg="#F59E0B"
+            />
+            <StatCard
+              label="In Process"
+              value={statsLoading ? "…" : jobStats.inProcess}
+              icon={<Cog size={16} color="#fff" />}
+              bg="#2563EB"
+            />
+            <StatCard
+              label="Delivered"
+              value={statsLoading ? "…" : jobStats.delivered}
+              icon={<CheckCircle2 size={16} color="#fff" />}
+              bg="#16A34A"
+            />
+            <StatCard
+              label="Total Revenue"
+              value={statsLoading ? "…" : `₹${jobStats.totalRevenue.toLocaleString("en-IN")}`}
+              icon={<IndianRupee size={16} color="#fff" />}
+              bg="#7C3AED"
+            />
+          </div>
 
           {/* Job Sheet Info Bar */}
 <div className="card" style={{ marginBottom: "6px", border: "1px solid #eee", padding: "5px 16px", borderRadius: 10, boxShadow: "none" }}>
@@ -1235,13 +1608,13 @@ if (!user || !user.username) {
             </div>
           </div>
 
-      {/* ============ MAIN GRID (REORDERED — NEW) ============ */}
+      {/* ============ MAIN GRID ============ */}
           <div className="row g-2">
 
             {/* MAIN COLUMN — Customer / Device / Service */}
             <div className="col-md-9">
 
-            {/* ===== NEW: Customer Details + Device Details side by side ===== */}
+            {/* ===== Customer Details + Device Details side by side ===== */}
             <div className="row g-2 mb-2 align-items-start">
 
               <div className="col-md-6">
@@ -1256,12 +1629,11 @@ if (!user || !user.username) {
                       <CustomerAutocomplete
                         type="name"
                         value={customerName}
-                        onChange={setCustomerName}
+                        onChange={(val) => handleLiveChange("customerName", val, setCustomerName)}
                         onSelect={(customer) => {
                           setCustomerName(customer.name || "");
                           setContact(customer.contact || "");
                           setAltContact(customer.altContact || "");
-                          setAddress(customer.address || "");
                           setEmail(customer.email || "");
                           setInstaFollowers(customer.instaFollowers === "Already Done" ? "Already Done" : "");
                           setGoogleReview(customer.googleReview === "Already Done" ? "Already Done" : "");
@@ -1273,12 +1645,12 @@ if (!user || !user.username) {
                           }`}
                         inputProps={{
                           onBlur: () => handleBlur("customerName", customerName),
-                          spellCheck: true // ✅ NEW — free browser spellcheck (red underline + right-click suggestions)
+                          spellCheck: true
                         }}
                       />
                       </Field>
                       {touched.customerName && formErrors.customerName && (
-                        <div className="invalid-feedback d-block" style={{ fontSize: 11 }}>⚠️ {formErrors.customerName}</div>
+                        <FieldError>{formErrors.customerName}</FieldError>
                       )}
                     </div>
 
@@ -1287,13 +1659,12 @@ if (!user || !user.username) {
                       <CustomerAutocomplete
                         type="contact"
                         value={contact}
-                        onChange={setContact}
+                        onChange={(val) => handleLiveChange("contact", val, setContact)}
                         filterNumbers={true}
                         onSelect={(customer) => {
                           setCustomerName(customer.name || "");
                           setContact(customer.contact || "");
                           setAltContact(customer.altContact || "");
-                          setAddress(customer.address || "");
                           setEmail(customer.email || "");
                           setInstaFollowers(customer.instaFollowers === "Already Done" ? "Already Done" : "");
                           setGoogleReview(customer.googleReview === "Already Done" ? "Already Done" : "");
@@ -1310,10 +1681,10 @@ if (!user || !user.username) {
                       />
                       </Field>
                       {touched.contact && formErrors.contact && (
-                        <div className="invalid-feedback d-block" style={{ fontSize: 11 }}>⚠️ {formErrors.contact}</div>
+                        <FieldError>{formErrors.contact}</FieldError>
                       )}
                       {touched.contact && !formErrors.contact && contact && (
-                        <div style={{ fontSize: 11, color: "#198754" }}> Valid number</div>
+                        <FieldSuccess>Valid number</FieldSuccess>
                       )}
                     </div>
 
@@ -1328,17 +1699,80 @@ if (!user || !user.username) {
                       />
                       </Field>
                     </div>
+
+                    {/* ================= DISTRICT / TALUK — MANDATORY + SEARCHABLE + BACKEND-DRIVEN =================
+                        MD sir kekkittaru: reception-la address vaangumbodhe District &
+                        Taluk-um select pannanum, apparam Excel download report-la
+                        district/taluk wise filter panna mudiyum. Searchable react-select
+                        vechirukken (Make/Model madhiri) — type pannalum list-la jump aagum.
+                        Master lists backend-la irukku (District/Taluk collections), aana
+                        adding/editing/deleting reception-la illa — sidebar "Data Operation" →
+                        District/Taluk popup-la mattum thaan (admin-only). Taluk list District
+                        select panna mattum thaan varum. */}
                     <div className="col-md-6">
-                      <Field label="Customer Address">
-                      <textarea
-                        rows="2"
-                        className="form-control form-control-sm"
-                        placeholder="Address"
-                        value={address}
-                        onChange={(e) => setAddress(e.target.value)}
-                        spellCheck="true"
-                      />
+                      <Field label="District" required>
+                        <Select
+                          options={districtOptions}
+                          value={district ? { label: district, value: district } : null}
+                          onChange={(selected) => {
+                            const val = selected?.value || "";
+                            setDistrict(val);
+                            setTaluk(""); // district maarina taluk reset aagum
+                            if (touched.district)
+                              setFormErrors(prev => ({ ...prev, district: validateField("district", val) }));
+                          }}
+                          onBlur={() => handleBlur("district", district)}
+                          placeholder="Search District..."
+                          isClearable
+                          filterOption={fuzzyFilterOption}
+                          menuPortalTarget={document.body}
+                          styles={{
+                            ...selectCompactText,
+                            menuPortal: (base) => ({ ...base, zIndex: 9999 }),
+                            control: (base, state) => ({
+                              ...selectCompactText.control(base, state),
+                              borderColor: touched.district && formErrors.district ? RED : "#CBD5E1",
+                              boxShadow: touched.district && formErrors.district ? "0 0 0 3px rgba(220,38,38,0.10)" : base.boxShadow,
+                            }),
+                          }}
+                        />
                       </Field>
+                      {touched.district && formErrors.district && (
+                        <FieldError>{formErrors.district}</FieldError>
+                      )}
+                    </div>
+
+                    <div className="col-md-6">
+                      <Field label="Taluk" required>
+                        <Select
+                          options={talukOptions}
+                          value={taluk ? { label: taluk, value: taluk } : null}
+                          onChange={(selected) => {
+                            const val = selected?.value || "";
+                            setTaluk(val);
+                            if (touched.taluk)
+                              setFormErrors(prev => ({ ...prev, taluk: validateField("taluk", val) }));
+                          }}
+                          onBlur={() => handleBlur("taluk", taluk)}
+                          placeholder={district ? "Search Taluk..." : "Select District first"}
+                          isClearable
+                          isDisabled={!district}
+                          filterOption={fuzzyFilterOption}
+                          menuPortalTarget={document.body}
+                          styles={{
+                            ...selectCompactText,
+                            menuPortal: (base) => ({ ...base, zIndex: 9999 }),
+                            control: (base, state) => ({
+                              ...selectCompactText.control(base, state),
+                              borderColor: touched.taluk && formErrors.taluk ? RED : "#CBD5E1",
+                              boxShadow: touched.taluk && formErrors.taluk ? "0 0 0 3px rgba(220,38,38,0.10)" : base.boxShadow,
+                            }),
+                          }}
+                        />
+                      </Field>
+                      {touched.taluk && formErrors.taluk && (
+                        <FieldError>{formErrors.taluk}</FieldError>
+                      )}
                     </div>
 
                     <div className="col-md-6">
@@ -1360,10 +1794,10 @@ if (!user || !user.username) {
                       />
                       </Field>
                       {touched.email && formErrors.email && (
-                        <div className="invalid-feedback d-block" style={{ fontSize: 11 }}>⚠️ {formErrors.email}</div>
+                        <FieldError>{formErrors.email}</FieldError>
                       )}
                       {touched.email && !formErrors.email && email && (
-                        <div style={{ fontSize: 11, color: "#198754" }}> Valid email</div>
+                        <FieldSuccess>Valid email</FieldSuccess>
                       )}
                     </div>
 
@@ -1417,10 +1851,6 @@ if (!user || !user.username) {
                         menuPortalTarget={document.body}
                       />
                       </Field>
-                      {/* ================= MAKE ADD-NEW (UPDATED) =================
-                          Was a plain input that only set customMake locally. Now has an
-                          "Add" button (same pattern as Physical Condition/Accessories) that
-                          POSTs to /api/makes so the Make actually appears in future dropdowns. */}
                       {make === "__custom" && (
                         <div className="d-flex gap-1 mt-2">
                           <input
@@ -1463,9 +1893,6 @@ if (!user || !user.username) {
                         menuPortalTarget={document.body}
                       />
                       </Field>
-                      {/* ================= MODEL ADD-NEW (UPDATED) =================
-                          Same fix as Make — POSTs { name, make } to /api/models so the model
-                          master list actually grows and shows up in the next job sheet's search. */}
                       {model === "__custom" && (
                         <div className="d-flex gap-1 mt-2">
                           <input
@@ -1489,16 +1916,51 @@ if (!user || !user.username) {
                       )}
                     </div>
 
+                    {/* ================= IMEI — NOW MANDATORY + "DEAD PHONE" ESCAPE HATCH (NEW) =================
+                        IMEI is required by default. If the phone is completely dead and IMEI
+                        can't be read, the "Dead Phone" checkbox below disables the input,
+                        clears any typed value, and skips the mandatory check — device.imei is
+                        saved as "DEAD" so reports can still tell these apart from a normal entry. */}
                     <div className="col-md-6">
-                      <Field label="IMEI Number" required>
+                      <Field label="IMEI Number" required={!isDeadPhone}>
                       <input
-                        className="form-control form-control-sm"
+                        className={`form-control form-control-sm ${touched.imei && formErrors.imei ? "is-invalid" :
+                            touched.imei && !formErrors.imei && imei ? "is-valid" : ""
+                          }`}
                         placeholder="15-digit IMEI"
                         value={imei}
                         maxLength={15}
-                        onChange={(e) => setImei(onlyNumbers(e.target.value))}
+                        disabled={isDeadPhone}
+                        onChange={(e) => {
+                          const val = onlyNumbers(e.target.value);
+                          setImei(val);
+                          if (touched.imei)
+                            setFormErrors(prev => ({ ...prev, imei: validateField("imei", val) }));
+                        }}
+                        onBlur={() => handleBlur("imei", imei)}
                       />
                       </Field>
+                      {touched.imei && formErrors.imei && (
+                        <FieldError>{formErrors.imei}</FieldError>
+                      )}
+                      <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 6 }}>
+                        <input
+                          type="checkbox"
+                          id="deadPhoneCheck"
+                          checked={isDeadPhone}
+                          onChange={(e) => {
+                            const checked = e.target.checked;
+                            setIsDeadPhone(checked);
+                            if (checked) {
+                              setImei("");
+                              setFormErrors(prev => ({ ...prev, imei: "" }));
+                            }
+                          }}
+                        />
+                        <label htmlFor="deadPhoneCheck" style={{ fontSize: 12, color: "#6B7280", cursor: "pointer", margin: 0 }}>
+                          Dead Phone (No IMEI available)
+                        </label>
+                      </div>
                     </div>
 
                     <div className="col-md-6">
@@ -1710,7 +2172,7 @@ if (!user || !user.username) {
                     </div>
                     <div className="card-body row g-2" style={{ padding: "8px 12px" }}>
 
-                      {/* ================= INCOME ₹ + INCOME DATE — merged into one box (NEW) =================
+                      {/* ================= INCOME ₹ + INCOME DATE — merged into one box =================
                           Was two separate fields (Income ₹ / Income Date). Now a single
                           form-control-styled box: the amount input sits on the left and a
                           calendar icon sits in the right corner. Clicking the icon opens the
@@ -1865,7 +2327,7 @@ if (!user || !user.username) {
               </div>
             </div>
 
-            {/* SIDE COLUMN — Visual Inspection → Physical Condition → Accessories (NEW ORDER, SELECT STYLE) */}
+            {/* SIDE COLUMN — Visual Inspection → Physical Condition → Accessories */}
             <div className="col-md-3">
 
             <div className="card shadow-sm mb-2" style={{ borderRadius: 10, overflow: "hidden" }}>
@@ -1912,10 +2374,6 @@ if (!user || !user.username) {
                         }}
                       />
                      
-                      {/* ================= FAULT ADD-NEW (UPDATED) =================
-                          Was a plain input that only updated this row's visualIssues entry.
-                          Now has an "Add" button that POSTs to /api/faults so the fault
-                          master list actually grows for future job sheets' search/dropdown. */}
                       {customFaults[i] !== undefined && (
                         <div className="d-flex gap-1 mt-2">
                           <input
@@ -1959,18 +2417,25 @@ if (!user || !user.username) {
                     </div>
                   ))}
 
-                  {/* <button
-                    className="btn btn-sm w-100"
-                    style={{ background: RED_SOFT_BG, color: RED_TEXT, border: `1px solid ${RED_BORDER}`, fontWeight: 600 }}
+                  {/* ================= ADD MORE ISSUE (FIX) =================
+                      🔴 BUG FIX: addIssue() function already existed (pushes a new blank
+                      row into visualIssues), aana adha call panna oru button EHDUME
+                      UI-la illa — adhunala oru phone-ku multiple faults add panna
+                      mudiyaama, one issue mattum thaan select panna mudinjuchu. Idhu andha
+                      button. */}
+                  <button
+                    type="button"
+                    className="btn btn-sm w-100 mt-1"
+                    style={{ background: RED_SOFT_BG, color: RED_TEXT, fontWeight: 600, border: `1px dashed ${RED_BORDER}` }}
                     onClick={addIssue}
                   >
-                    <Plus size={14} /> Add Issue
-                  </button> */}
+                    <Plus size={14} style={{ marginRight: 4, verticalAlign: -2 }} /> Add More Issue
+                  </button>
 
                 </div>
               </div>
 
-              {/* PHYSICAL CONDITION — multi-select, backend-driven (UPDATED) */}
+              {/* PHYSICAL CONDITION — multi-select, backend-driven */}
              <div className="card shadow-sm mb-2" style={{ borderRadius: 10, overflow: "hidden" }}>
                 <div className="card-header d-flex align-items-center gap-2" style={redHeader}>
                   <Bandage size={16} /> Physical Condition
@@ -2016,7 +2481,7 @@ if (!user || !user.username) {
                 </div>
               </div>
 
-              {/* ACCESSORIES — multi-select, backend-driven (UPDATED) */}
+              {/* ACCESSORIES — multi-select, backend-driven */}
               <div className="card shadow-sm" style={{ borderRadius: 10, overflow: "hidden" }}>
                 <div className="card-header d-flex align-items-center gap-2" style={redHeader}>
                   <Gift size={16} /> Accessories Received
@@ -2186,7 +2651,7 @@ if (!user || !user.username) {
           <button
             style={{ ...sideBtnEstimate, width: "auto" }}
             onClick={() => {
-              if (!editData?._id) { alert("Please save Job Sheet first"); return; }
+              if (!editData?._id) { showToast("Please save Job Sheet first", "warning"); return; }
               window.open(`${window.location.origin}/estimate-bill/${editData._id}`, "_blank");
             }}
           >
@@ -2196,21 +2661,34 @@ if (!user || !user.username) {
           <button
             style={{ ...sideBtnInvoice, width: "auto" }}
             onClick={async () => {
-              if (!localEditData?._id) { alert("Please save Job Sheet first"); return; }
+              if (!localEditData?._id) { showToast("Please save Job Sheet first", "warning"); return; }
               try {
                 window.open(`${window.location.origin}/invoice/${localEditData._id}`, "_blank");
                 await axios.put(`${API}/api/jobsheets/${localEditData._id}/invoice`);
                 setLocalEditData(prev => ({ ...prev, isInvoiced: true }));
-                alert("Invoice Generated Successfully 🔒");
+                showToast("Invoice Generated Successfully", "success");
                 setTimeout(() => { window.location.reload(); }, 1000);
               } catch (err) {
                 console.error(err);
-                alert("Invoice failed ❌");
+                showToast("Invoice failed", "error");
               }
             }}
           >
             <Receipt size={16} /> Invoice
           </button>
+
+          {/* ================= SEND WHATSAPP BUTTON (NEW) =================
+              Only shown once the job sheet is saved (needs an _id). Sends whatever
+              Device Status is currently saved in the DB to the customer's WhatsApp. */}
+          {/* {isEdit && localEditData?._id && (
+            <button
+              style={{ ...sideBtnWhatsApp, width: "auto" }}
+              onClick={handleSendWhatsApp}
+              disabled={sendingWhatsApp}
+            >
+              <MessageCircle size={16} /> {sendingWhatsApp ? "Sending..." : "Send WhatsApp"}
+            </button>
+          )} */}
 
           <button style={{ ...sideBtnHome, width: "auto" }} onClick={() => navigate("/home")}>
             <Home size={16} /> Home
@@ -2248,10 +2726,11 @@ if (!user || !user.username) {
                   setSpareCharge("");
                   setSpareItems([]);
                   setRemarks("");
-                  alert(`✅ Rebill #${rebillCount} opened! Add new charges and generate invoice.`);
+                  showToast(`Rebill #${rebillCount} opened! Add new charges and generate invoice.`, "success");
+                  fetchJobStats(); // rebill panna status "Received" aagum — stats refresh
                 } catch (err) {
                   console.error(err);
-                  alert("Rebill failed ❌");
+                  showToast("Rebill failed", "error");
                 } finally {
                   setRebilling(false);
                 }

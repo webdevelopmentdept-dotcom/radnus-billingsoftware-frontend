@@ -296,6 +296,33 @@ const ServiceRepReportPage = () => {
   return (
     <div style={{ maxWidth: 1400, margin: "0 auto", padding: "24px 16px", fontFamily: "system-ui, sans-serif" }}>
 
+      {/* ================= CUSTOM SCROLLBAR (matches AllReportPage) =================
+          Applies to every ".scrollable-table" wrapper on this page — the per-rep
+          tables AND the dashboard tables — so all horizontal scrollbars here use
+          the same high-contrast blue thumb instead of the flat default grey. */}
+      <style>{`
+        .scrollable-table::-webkit-scrollbar {
+          height: 12px;
+          width: 12px;
+        }
+        .scrollable-table::-webkit-scrollbar-track {
+          background: #e2e8f0;
+          border-radius: 8px;
+        }
+        .scrollable-table::-webkit-scrollbar-thumb {
+          background: #2563eb;
+          border-radius: 8px;
+          border: 2px solid #e2e8f0;
+        }
+        .scrollable-table::-webkit-scrollbar-thumb:hover {
+          background: #1d4ed8;
+        }
+        .scrollable-table {
+          scrollbar-width: thin;
+          scrollbar-color: #2563eb #e2e8f0;
+        }
+      `}</style>
+
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12, marginBottom: 20 }}>
         <h4 style={{ fontWeight: 700, margin: 0, fontSize: 20, display: "flex", alignItems: "center", gap: 8 }}>
           <FaUserTie /> {currentRole !== "admin" ? `${currentDisplayName}'s Report` : "Service Rep Report"}

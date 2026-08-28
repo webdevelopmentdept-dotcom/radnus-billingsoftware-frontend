@@ -10,6 +10,7 @@ import DrawerPopup from "./popups/DrawerPopup";
 import EngineerPopup from "./popups/EngineerPopup";
 import UserAddition from "./popups/UserAddition";
 import UserListPopup from "./popups/UserListPopup";
+import DistrictTalukPopup from "./popups/Districttalukpopup"
 
 const COLLAPSED_W = 64;
 const EXPANDED_W = 210;
@@ -68,6 +69,7 @@ const JobSheetSidebar = () => {
   const [showEngineerModal, setShowEngineerModal] = useState(false);
   const [showUserModal, setShowUserModal] = useState(false);
   const [showUserList, setShowUserList] = useState(false);
+  const [showDistrictTalukModal, setShowDistrictTalukModal] = useState(false);
 
   const handleLogout = () => {
     sessionStorage.removeItem("token");
@@ -270,6 +272,7 @@ const JobSheetSidebar = () => {
                 <div style={subBtn} onClick={() => { setShowMakeModal(true); setMobileOpen(false); }}>Make</div>
                 <div style={subBtn} onClick={() => { setShowModelModal(true); setMobileOpen(false); }}>Model</div>
                 <div style={subBtn} onClick={() => { setShowDrawerModal(true); setMobileOpen(false); }}>Drawer</div>
+                <div style={subBtn} onClick={() => { setShowDistrictTalukModal(true); setMobileOpen(false); }}>District / Taluk</div>
               </div>
             </div>
           </div>
@@ -349,13 +352,14 @@ const JobSheetSidebar = () => {
         </div>
       )}
 
-      {showMakeModal     && <AdminMakeModal    onClose={() => setShowMakeModal(false)} />}
-      {showModelModal    && <AdminModelModal   onClose={() => setShowModelModal(false)} />}
-      {showFaultModal    && <FaultPopup        onClose={() => setShowFaultModal(false)} />}
-      {showDrawerModal   && <DrawerPopup       onClose={() => setShowDrawerModal(false)} />}
-      {showEngineerModal && <EngineerPopup     onClose={() => setShowEngineerModal(false)} />}
-      {showUserModal     && <UserAddition      onClose={() => setShowUserModal(false)} />}
-      {showUserList      && <UserListPopup     onClose={() => setShowUserList(false)} />}
+      {showMakeModal          && <AdminMakeModal      onClose={() => setShowMakeModal(false)} />}
+      {showModelModal         && <AdminModelModal     onClose={() => setShowModelModal(false)} />}
+      {showFaultModal         && <FaultPopup          onClose={() => setShowFaultModal(false)} />}
+      {showDrawerModal        && <DrawerPopup         onClose={() => setShowDrawerModal(false)} />}
+      {showEngineerModal      && <EngineerPopup       onClose={() => setShowEngineerModal(false)} />}
+      {showUserModal          && <UserAddition        onClose={() => setShowUserModal(false)} />}
+      {showUserList           && <UserListPopup       onClose={() => setShowUserList(false)} />}
+      {showDistrictTalukModal && <DistrictTalukPopup  onClose={() => setShowDistrictTalukModal(false)} />}
     </>
   );
 };

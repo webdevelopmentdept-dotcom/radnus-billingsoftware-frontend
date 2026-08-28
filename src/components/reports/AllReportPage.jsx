@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom";
 import {
   FileText, Search, RotateCcw, Download, Printer,
   Instagram, Star, CheckCircle2, ThumbsUp, XCircle,
-  Inbox, StickyNote, Loader2, IndianRupee,
+  Inbox, StickyNote, Loader2, IndianRupee, Skull,
 } from "lucide-react";
 
 const AllReportPage = () => {
@@ -65,6 +65,33 @@ const AllReportPage = () => {
 
   const handlePrint = () => window.print();
 
+  /* ================= IMEI DISPLAY HELPER (NEW) =================
+     device.imei is saved as the literal string "DEAD" when the Job Sheet's
+     "Dead Phone (No IMEI available)" checkbox was ticked (see JobSheetPage).
+     This report only ever showed the raw string before, so a normal number
+     and "DEAD" looked the same in a plain cell. Now: a real IMEI shows as
+     before, and "DEAD" shows as a small red skull badge so it's obvious at
+     a glance which job sheets have no IMEI on file. Used for both the table
+     cell and the Excel export label.
+  */
+  const imeiDisplayValue = (imei) => (imei === "DEAD" ? "DEAD (No IMEI)" : (imei || "-"));
+
+  const ImeiCell = ({ imei }) => {
+    if (imei === "DEAD") {
+      return (
+        <span style={{
+          display: "inline-flex", alignItems: "center", gap: 4,
+          background: "#fee2e2", color: "#991b1b",
+          padding: "2px 7px", borderRadius: 10,
+          fontSize: 11, fontWeight: 700, whiteSpace: "nowrap",
+        }}>
+          <Skull size={11} /> DEAD
+        </span>
+      );
+    }
+    return <span>{imei || "-"}</span>;
+  };
+
   const handleExcelDownload = () => {
     if (filteredData.length === 0) { alert("No data to export ❌"); return; }
 
@@ -76,15 +103,26 @@ const AllReportPage = () => {
       "Contact":            item.customer?.contact || "-",
       "Alt Contact":        item.customer?.altContact || "-",
       "Email":              item.customer?.email || "-",
-      "Address":            item.customer?.address || "-",
+     
+      "District":           item.customer?.district || "-",
+      "Taluk":              item.customer?.taluk || "-",
       "Make":               item.device?.make || "-",
       "Model":              item.device?.model || "-",
-      "IMEI":               item.device?.imei || "-",
+      "IMEI":               imeiDisplayValue(item.device?.imei),
       "Warranty":           item.device?.warranty || "-",
       "Status":             item.device?.mobileStatus || "-",
       "Engineer":           item.service?.engineer || "-",
       "Dealer":             item.service?.dealer || "-",
       "Drawer":             item.service?.drawer || "-",
+      // ===== NEW: Income / Service / Spare / Others / Advance breakdown =====
+      "Income ₹":           Number(item.service?.income || 0),
+      "Income Date":        item.service?.incomeDate ? new Date(item.service.incomeDate).toLocaleDateString("en-IN") : "-",
+      "Service ₹":          Number(item.service?.serviceCharge || 0),
+      "Spare ₹":            Number(item.service?.spareCharge || 0),
+      "Others ₹":           Number(item.service?.othersAmount || 0),
+      "Advance ₹":          Number(item.service?.advanceAmount || 0),
+      "Advance Date":       item.service?.advanceDate ? new Date(item.service.advanceDate).toLocaleDateString("en-IN") : "-",
+      // ===== END NEW =====
       "Total":              (Number(item.service?.income || 0) + Number(item.service?.spareCharge || 0)),
       "Payment Mode":       item.service?.paymentMode || "-",
       "Estimate":           item.service?.estimate || "-",
@@ -106,9 +144,14 @@ const AllReportPage = () => {
     const ws = XLSX.utils.json_to_sheet(rows);
     ws["!cols"] = [
       { wch: 6 },  { wch: 12 }, { wch: 12 }, { wch: 18 }, { wch: 13 },
-      { wch: 13 }, { wch: 22 }, { wch: 22 }, { wch: 14 }, { wch: 16 },
+      { wch: 13 }, { wch: 22 }, { wch: 22 }, { wch: 16 }, { wch: 16 },
+      { wch: 14 }, { wch: 16 },
       { wch: 17 }, { wch: 12 }, { wch: 16 }, { wch: 14 }, { wch: 16 },
-      { wch: 12 }, { wch: 10 }, { wch: 13 },
+      { wch: 12 },
+      // ===== NEW: widths for Income/Service/Spare/Others/Advance columns =====
+      { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 14 },
+      // ===== END NEW =====
+      { wch: 10 }, { wch: 13 },
       { wch: 14 }, { wch: 13 }, { wch: 14 }, { wch: 28 }, { wch: 28 },
       { wch: 22 }, { wch: 13 }, { wch: 12 }, { wch: 14 },
       { wch: 14 }, { wch: 14 }, 
@@ -146,8 +189,12 @@ const totalAmount  = totalService + totalSpare;
 
   const headers = [
     "SL", "Date", "Job No", "Name", "Contact", "Alt Contact",
+    "District", "Taluk",
     "Make", "Model", "IMEI", "Warranty", "Status",
     "Engineer", "Dealer", "Drawer",
+    // ===== NEW: Income / Service / Spare / Others / Advance breakdown =====
+    "Income ₹", "Income Date", "Service ₹", "Spare ₹", "Others ₹", "Advance ₹", "Advance Date",
+    // ===== END NEW =====
     "Total ₹", "Payment",
     "Problems", "Physical Cond.", "Accessories",
     "Repair Date", "Delivery Date", "Margin ₹", "Remarks",
@@ -260,7 +307,7 @@ const totalAmount  = totalService + totalSpare;
 
       {/* TABLE */}
       <div style={{ background: "#fff", borderRadius: "12px", boxShadow: "0 1px 6px rgba(0,0,0,0.08)", border: "1px solid #e2e8f0", overflow: "hidden" }}>
-        <div style={{ overflowX: "auto", maxHeight: "62vh", overflowY: "auto" }}>
+        <div className="report-scroll" style={{ overflowX: "auto", maxHeight: "62vh", overflowY: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
 
             <thead style={{ position: "sticky", top: 0, zIndex: 10 }}>
@@ -297,9 +344,12 @@ const spare = Number(item.service?.spareCharge   || 0);
                       <td style={{ ...td, fontWeight: 600 }}>{item.customer?.name || "-"}</td>
                       <td style={td}>{item.customer?.contact || "-"}</td>
                       <td style={td}>{item.customer?.altContact || "-"}</td>
+                      <td style={td}>{item.customer?.district || "-"}</td>
+                      <td style={td}>{item.customer?.taluk || "-"}</td>
                       <td style={td}>{item.device?.make || "-"}</td>
                       <td style={td}>{item.device?.model || "-"}</td>
-                      <td style={td}>{item.device?.imei || "-"}</td>
+                      {/* ===== IMEI — shows the actual number, or a red "DEAD" badge ===== */}
+                      <td style={td}><ImeiCell imei={item.device?.imei} /></td>
                       <td style={td}>{item.device?.warranty || "-"}</td>
                       <td style={td}>
                         <span style={getStatusStyle(item.device?.mobileStatus)}>
@@ -314,6 +364,31 @@ const spare = Number(item.service?.spareCharge   || 0);
                       <td style={td}>{item.service?.engineer || "-"}</td>
                       <td style={td}>{item.service?.dealer || "-"}</td>
                       <td style={td}>{item.service?.drawer || "-"}</td>
+
+                      {/* ===== NEW: Income / Service / Spare / Others / Advance breakdown ===== */}
+                      <td style={{ ...td, color: "#0369a1", fontWeight: 600 }}>
+                        {svc ? `₹${svc.toLocaleString("en-IN")}` : "-"}
+                      </td>
+                      <td style={td}>
+                        {item.service?.incomeDate ? new Date(item.service.incomeDate).toLocaleDateString("en-IN") : "-"}
+                      </td>
+                      <td style={td}>
+                        {item.service?.serviceCharge ? `₹${Number(item.service.serviceCharge).toLocaleString("en-IN")}` : "-"}
+                      </td>
+                      <td style={td}>
+                        {spare ? `₹${spare.toLocaleString("en-IN")}` : "-"}
+                      </td>
+                      <td style={td}>
+                        {item.service?.othersAmount ? `₹${Number(item.service.othersAmount).toLocaleString("en-IN")}` : "-"}
+                      </td>
+                      <td style={{ ...td, color: "#0d6efd", fontWeight: 600 }}>
+                        {item.service?.advanceAmount ? `₹${Number(item.service.advanceAmount).toLocaleString("en-IN")}` : "-"}
+                      </td>
+                      <td style={td}>
+                        {item.service?.advanceDate ? new Date(item.service.advanceDate).toLocaleDateString("en-IN") : "-"}
+                      </td>
+                      {/* ===== END NEW ===== */}
+
                       <td style={{ ...td, color: "#059669", fontWeight: 700 }}>₹{(svc + spare).toLocaleString("en-IN")}</td>
                       <td style={td}>{item.service?.paymentMode || "-"}</td>
                       <td style={{ ...td, maxWidth: "160px", whiteSpace: "normal", wordBreak: "break-word" }}>{item.visualIssues?.filter(Boolean).join(", ") || "-"}</td>
@@ -342,11 +417,11 @@ const spare = Number(item.service?.spareCharge   || 0);
               )}
             </tbody>
 
-            {/* FOOTER — colSpan 14 covers cols 0-13, then Total ₹ at 14, then colSpan 12 for the rest */}
+            {/* FOOTER — colSpan 23 covers cols 0-22 (up to Advance Date), then Total ₹ at col 23, then colSpan 12 for the rest */}
             {filteredData.length > 0 && (
               <tfoot>
                 <tr style={{ background: "#1e293b", color: "#fff", fontWeight: 700 }}>
-                  <td colSpan="14" style={{ padding: "10px 8px", textAlign: "right", fontSize: "12px" }}>
+                  <td colSpan="23" style={{ padding: "10px 8px", textAlign: "right", fontSize: "12px" }}>
                     TOTAL ({filteredData.length} records):
                   </td>
                   <td style={{ padding: "10px 8px", color: "#6ee7b7" }}>₹{totalAmount.toLocaleString("en-IN")}</td>
@@ -365,6 +440,30 @@ const spare = Number(item.service?.spareCharge   || 0);
           body { background: white; font-size: 11px; }
           table { font-size: 10px; }
           th, td { padding: 4px 5px !important; }
+        }
+
+        /* Custom scrollbar for the report table — high-contrast blue thumb
+           instead of the default flat grey, so it's clearly visible against
+           the white table background. */
+        .report-scroll::-webkit-scrollbar {
+          height: 12px;
+          width: 12px;
+        }
+        .report-scroll::-webkit-scrollbar-track {
+          background: #e2e8f0;
+          border-radius: 8px;
+        }
+        .report-scroll::-webkit-scrollbar-thumb {
+          background: #2563eb;
+          border-radius: 8px;
+          border: 2px solid #e2e8f0;
+        }
+        .report-scroll::-webkit-scrollbar-thumb:hover {
+          background: #1d4ed8;
+        }
+        .report-scroll {
+          scrollbar-width: thin;
+          scrollbar-color: #2563eb #e2e8f0;
         }
       `}</style>
     </div>
