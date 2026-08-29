@@ -60,7 +60,7 @@ const InvoiceBill = () => {
   const accessoriesText =
     (job.accessories || []).filter(Boolean).join(", ") || "NIL";
 
-  // ── Received Date (repairDate) & Delivery Date, formatted as DD/MM/YYYY ──
+  // ── Received Date & Delivery Date, formatted as DD/MM/YYYY ──
   const formatDate = (d) => {
     if (!d) return "-";
     const dateObj = new Date(d);
@@ -70,7 +70,13 @@ const InvoiceBill = () => {
     return `${day}/${month}/${year}`;
   };
 
-  const receivedDateText = formatDate(job.service?.repairDate);
+  // ================= FIX =================
+  // 🔴 BUG FIX: "Received Date" was showing job.service?.repairDate, which is a
+  // manually-editable field on the Job Sheet (engineers can change it any time).
+  // That made Invoice's "Received Date" drift from reality. It should instead show
+  // the actual date the job sheet was first saved/created in the system — the same
+  // concept EstimateBill already uses via data.createdAt. Now both documents agree.
+  const receivedDateText = formatDate(job.createdAt);
   const deliveryDateText = formatDate(job.service?.deliveryDate);
 
   // ── FIX: previously called html2pdf().from(element).save() with ZERO

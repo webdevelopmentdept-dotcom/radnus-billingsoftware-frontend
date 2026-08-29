@@ -29,9 +29,17 @@ const FaultPopup = ({ onClose }) => {
           name: faultName,
         });
       } else {
-        await axios.post(`${API}/api/faults`, {
+        const res = await axios.post(`${API}/api/faults`, {
           name: faultName,
         });
+
+        // ✅ NEW — backend now returns { alreadyExists, message } instead of silently
+        // returning the existing record. Show the user clearly whether this was a
+        // fresh add or it matched an existing fault case-insensitively
+        // (e.g. typing "Screen Crack" when "screen crack" already exists).
+        if (res.data?.alreadyExists) {
+          alert(res.data.message || `"${res.data.name}" already exists ⚠️`);
+        }
       }
 
       setFaultName("");

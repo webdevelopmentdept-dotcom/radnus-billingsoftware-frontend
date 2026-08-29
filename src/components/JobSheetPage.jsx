@@ -610,138 +610,244 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
     ...accessoryList.map(x => ({ label: x.name, value: x.name })),
     { label: "Others (Add New)", value: "__custom" },
   ];
+const handleAddCustomPhysicalCondition = async () => {
+  const val = customPhysicalConditionText.trim();
+  if (!val) return;
 
-  const handleAddCustomPhysicalCondition = async () => {
-    const val = customPhysicalConditionText.trim();
-    if (!val) return;
-    setAddingPhysicalCondition(true);
-    try {
-      const res = await axios.post(`${API}/api/physical-conditions`, { name: val });
-      setPhysicalConditionList(prev => {
-        const exists = prev.some(p => p.name.toLowerCase() === res.data.name.toLowerCase());
-        return exists ? prev : [res.data, ...prev];
-      });
-      // Swap the placeholder "__custom" marker out for the real saved name
-      setPhysicalCondition(prev => {
-        const withoutMarker = prev.filter(v => v !== "__custom");
-        return withoutMarker.includes(res.data.name) ? withoutMarker : [...withoutMarker, res.data.name];
-      });
-      setCustomPhysicalConditionText("");
-    } catch (err) {
-      console.error(err);
-      showToast("Failed to add physical condition", "error");
-    } finally {
-      setAddingPhysicalCondition(false);
-    }
-  };
+  // ✅ CASE-INSENSITIVE LOCAL CHECK FIRST — same idea as handleAddCustomMake.
+  const existingLocal = physicalConditionList.find(
+    (p) => p.name.toString().trim().toLowerCase() === val.toLowerCase()
+  );
 
-  const handleAddCustomAccessory = async () => {
-    const val = customAccessoryText.trim();
-    if (!val) return;
-    setAddingAccessory(true);
-    try {
-      const res = await axios.post(`${API}/api/accessories`, { name: val });
-      setAccessoryList(prev => {
-        const exists = prev.some(a => a.name.toLowerCase() === res.data.name.toLowerCase());
-        return exists ? prev : [res.data, ...prev];
-      });
-      setAccessories(prev => {
-        const withoutMarker = prev.filter(v => v !== "__custom");
-        return withoutMarker.includes(res.data.name) ? withoutMarker : [...withoutMarker, res.data.name];
-      });
-      setCustomAccessoryText("");
-    } catch (err) {
-      console.error(err);
-      showToast("Failed to add accessory", "error");
-    } finally {
-      setAddingAccessory(false);
+  if (existingLocal) {
+    setPhysicalCondition(prev => {
+      const withoutMarker = prev.filter(v => v !== "__custom");
+      return withoutMarker.includes(existingLocal.name) ? withoutMarker : [...withoutMarker, existingLocal.name];
+    });
+    setCustomPhysicalConditionText("");
+    showToast(`"${existingLocal.name}" already exists — selected it`, "warning");
+    return; // 🔴 stop here — do NOT call the add API
+  }
+
+  setAddingPhysicalCondition(true);
+  try {
+    const res = await axios.post(`${API}/api/physical-conditions`, { name: val });
+    setPhysicalConditionList(prev => {
+      const exists = prev.some(p => p.name.toLowerCase() === res.data.name.toLowerCase());
+      return exists ? prev : [res.data, ...prev];
+    });
+    setPhysicalCondition(prev => {
+      const withoutMarker = prev.filter(v => v !== "__custom");
+      return withoutMarker.includes(res.data.name) ? withoutMarker : [...withoutMarker, res.data.name];
+    });
+    setCustomPhysicalConditionText("");
+    if (res.data.alreadyExists) {
+      showToast(res.data.message || `"${res.data.name}" already exists — selected it`, "warning");
+    } else {
+      showToast(`"${res.data.name}" added`, "success");
     }
-  };
+  } catch (err) {
+    console.error(err);
+    showToast("Failed to add physical condition", "error");
+  } finally {
+    setAddingPhysicalCondition(false);
+  }
+};
+ const handleAddCustomAccessory = async () => {
+  const val = customAccessoryText.trim();
+  if (!val) return;
+
+  // ✅ CASE-INSENSITIVE LOCAL CHECK FIRST — same idea as handleAddCustomMake.
+  const existingLocal = accessoryList.find(
+    (a) => a.name.toString().trim().toLowerCase() === val.toLowerCase()
+  );
+
+  if (existingLocal) {
+    setAccessories(prev => {
+      const withoutMarker = prev.filter(v => v !== "__custom");
+      return withoutMarker.includes(existingLocal.name) ? withoutMarker : [...withoutMarker, existingLocal.name];
+    });
+    setCustomAccessoryText("");
+    showToast(`"${existingLocal.name}" already exists — selected it`, "warning");
+    return; // 🔴 stop here — do NOT call the add API
+  }
+
+  setAddingAccessory(true);
+  try {
+    const res = await axios.post(`${API}/api/accessories`, { name: val });
+    setAccessoryList(prev => {
+      const exists = prev.some(a => a.name.toLowerCase() === res.data.name.toLowerCase());
+      return exists ? prev : [res.data, ...prev];
+    });
+    setAccessories(prev => {
+      const withoutMarker = prev.filter(v => v !== "__custom");
+      return withoutMarker.includes(res.data.name) ? withoutMarker : [...withoutMarker, res.data.name];
+    });
+    setCustomAccessoryText("");
+    if (res.data.alreadyExists) {
+      showToast(res.data.message || `"${res.data.name}" already exists — selected it`, "warning");
+    } else {
+      showToast(`"${res.data.name}" added`, "success");
+    }
+  } catch (err) {
+    console.error(err);
+    showToast("Failed to add accessory", "error");
+  } finally {
+    setAddingAccessory(false);
+  }
+};
 
   /* ================= ADD NEW MAKE =================
      Mirrors handleAddCustomPhysicalCondition — POSTs to /api/makes (makeRoutes.js already
      supports this), pushes the new Make into makeList so the Select dropdown has it right
      away, and switches `make` from "__custom" to the real saved name. */
-  const handleAddCustomMake = async () => {
-    const val = customMake.trim();
-    if (!val) return;
-    setAddingMake(true);
-    try {
-      const res = await axios.post(`${API}/api/makes`, { name: val });
-      const newMakeObj = res.data.data || res.data;
-      setMakeList(prev => {
-        const exists = prev.some(m => (m.name || m).toLowerCase() === newMakeObj.name.toLowerCase());
-        return exists ? prev : [newMakeObj, ...prev];
-      });
-      setMake(newMakeObj.name);
-      setCustomMake("");
-    } catch (err) {
-      console.error(err);
-      showToast(err.response?.data?.message || "Failed to add make", "error");
-    } finally {
-      setAddingMake(false);
+ const handleAddCustomMake = async () => {
+  const val = customMake.trim();
+  if (!val) return;
+
+  // ✅ CASE-INSENSITIVE LOCAL CHECK FIRST — no need to hit the API if it's already
+  // in the list we already fetched. "GOOGLE" and "google" are treated as the same.
+  const existingLocal = makeList.find(
+    (m) => (m.name || m).toLowerCase() === val.toLowerCase()
+  );
+
+  if (existingLocal) {
+    const existingName = existingLocal.name || existingLocal;
+    setMake(existingName);
+    setCustomMake("");
+    showToast(`"${existingName}" already exists — selected it`, "warning");
+    return; // 🔴 stop here — do NOT call the add API
+  }
+
+  // Not found locally → genuinely new, so add it
+  setAddingMake(true);
+  try {
+    const res = await axios.post(`${API}/api/makes`, { name: val });
+    const newMakeObj = res.data.data || res.data;
+    setMakeList(prev => {
+      const exists = prev.some(m => (m.name || m).toLowerCase() === newMakeObj.name.toLowerCase());
+      return exists ? prev : [newMakeObj, ...prev];
+    });
+    setMake(newMakeObj.name);
+    setCustomMake("");
+
+    if (res.data.alreadyExists) {
+      showToast(res.data.message || `"${newMakeObj.name}" already exists — selected it`, "warning");
+    } else {
+      showToast(`"${newMakeObj.name}" added`, "success");
     }
-  };
+  } catch (err) {
+    console.error(err);
+    showToast(err.response?.data?.message || "Failed to add make", "error");
+  } finally {
+    setAddingMake(false);
+  }
+};
 
   /* ================= ADD NEW MODEL =================
      Mirrors handleAddCustomMake — POSTs to /api/models with { name, make }, since modelRoutes.js
      requires both fields. Uses whichever Make is currently selected (or the just-typed custom
      Make) so the new Model is correctly linked. */
-  const handleAddCustomModel = async () => {
-    const val = customModel.trim();
-    if (!val) return;
-    const selectedMake = make === "__custom" ? customMake : make;
-    if (!selectedMake) {
-      showToast("Select or Add a Make first", "warning");
-      return;
+const handleAddCustomModel = async () => {
+  const val = customModel.trim();
+  if (!val) return;
+  const selectedMake = make === "__custom" ? customMake : make;
+  if (!selectedMake) {
+    showToast("Select or Add a Make first", "warning");
+    return;
+  }
+
+  // ✅ CASE-INSENSITIVE LOCAL CHECK FIRST — same idea as handleAddCustomMake.
+  // Models are unique per (name + make) pair, so BOTH must match (trimmed, case-insensitive).
+  const existingLocal = modelList.find((m) => {
+    const mName = (m.name || m).toString().trim().toLowerCase();
+    const mMake = (m.make || selectedMake).toString().trim().toLowerCase();
+    return mName === val.toLowerCase() && mMake === selectedMake.trim().toLowerCase();
+  });
+
+  if (existingLocal) {
+    const existingName = existingLocal.name || existingLocal;
+    setModel(existingName);
+    setCustomModel("");
+    showToast(`"${existingName}" already exists under "${selectedMake}" — selected it`, "warning");
+    return; // 🔴 stop here — do NOT call the add API
+  }
+
+  setAddingModel(true);
+  try {
+    const res = await axios.post(`${API}/api/models`, { name: val, make: selectedMake });
+    const newModelObj = res.data.data || res.data;
+    setModelList(prev => {
+      const exists = prev.some(m => (m.name || m).toLowerCase() === newModelObj.name.toLowerCase());
+      return exists ? prev : [newModelObj, ...prev];
+    });
+    setModel(newModelObj.name);
+    setCustomModel("");
+    if (res.data.alreadyExists) {
+      showToast(res.data.message || `"${newModelObj.name}" already exists — selected it`, "warning");
+    } else {
+      showToast(`"${newModelObj.name}" added`, "success");
     }
-    setAddingModel(true);
-    try {
-      const res = await axios.post(`${API}/api/models`, { name: val, make: selectedMake });
-      const newModelObj = res.data.data || res.data;
-      setModelList(prev => {
-        const exists = prev.some(m => (m.name || m).toLowerCase() === newModelObj.name.toLowerCase());
-        return exists ? prev : [newModelObj, ...prev];
-      });
-      setModel(newModelObj.name);
-      setCustomModel("");
-    } catch (err) {
-      console.error(err);
-      showToast(err.response?.data?.message || "Failed to add model", "error");
-    } finally {
-      setAddingModel(false);
-    }
-  };
+  } catch (err) {
+    console.error(err);
+    showToast(err.response?.data?.message || "Failed to add model", "error");
+  } finally {
+    setAddingModel(false);
+  }
+};
 
   /* ================= ADD NEW FAULT / VISUAL ISSUE =================
      Mirrors handleAddCustomAccessory — POSTs to /api/faults so the fault master list
      (faultList) grows, then swaps this row's custom text input back to a normal selected
      value. */
-  const handleAddCustomFault = async (i) => {
-    const val = (customFaults[i] || "").trim();
-    if (!val) return;
-    setAddingFault(prev => ({ ...prev, [i]: true }));
-    try {
-      const res = await axios.post(`${API}/api/faults`, { name: val });
-      const newFault = res.data.data || res.data;
-      setFaultList(prev => {
-        const exists = prev.some(f => f.name.toLowerCase() === newFault.name.toLowerCase());
-        return exists ? prev : [newFault, ...prev];
-      });
-      setCustomFaults(prev => {
-        const copy = { ...prev };
-        delete copy[i];
-        return copy;
-      });
-      updateIssue(i, newFault.name);
-    } catch (err) {
-      console.error(err);
-      showToast(err.response?.data?.message || "Failed to add fault", "error");
-    } finally {
-      setAddingFault(prev => ({ ...prev, [i]: false }));
-    }
-  };
+const handleAddCustomFault = async (i) => {
+  const val = (customFaults[i] || "").trim();
+  if (!val) return;
 
+  // ✅ CASE-INSENSITIVE LOCAL CHECK FIRST — same idea as handleAddCustomMake.
+  const existingLocal = faultList.find(
+    (f) => f.name.toString().trim().toLowerCase() === val.toLowerCase()
+  );
+
+  if (existingLocal) {
+    setCustomFaults(prev => {
+      const copy = { ...prev };
+      delete copy[i];
+      return copy;
+    });
+    updateIssue(i, existingLocal.name);
+    showToast(`"${existingLocal.name}" already exists — selected it`, "warning");
+    return; // 🔴 stop here — do NOT call the add API
+  }
+
+  setAddingFault(prev => ({ ...prev, [i]: true }));
+  try {
+    const res = await axios.post(`${API}/api/faults`, { name: val });
+    // NOTE: faultRoutes.js spreads the fault fields directly (no `.data` wrapper),
+    // so the new fault object IS res.data itself.
+    const newFault = res.data;
+    setFaultList(prev => {
+      const exists = prev.some(f => f.name.toLowerCase() === newFault.name.toLowerCase());
+      return exists ? prev : [newFault, ...prev];
+    });
+    setCustomFaults(prev => {
+      const copy = { ...prev };
+      delete copy[i];
+      return copy;
+    });
+    updateIssue(i, newFault.name);
+    if (res.data.alreadyExists) {
+      showToast(res.data.message || `"${newFault.name}" already exists — selected it`, "warning");
+    } else {
+      showToast(`"${newFault.name}" added`, "success");
+    }
+  } catch (err) {
+    console.error(err);
+    showToast(err.response?.data?.message || "Failed to add fault", "error");
+  } finally {
+    setAddingFault(prev => ({ ...prev, [i]: false }));
+  }
+};
   useEffect(() => {
     axios.get(`${API}/api/faults`)
       .then(res => setFaultList(res.data))

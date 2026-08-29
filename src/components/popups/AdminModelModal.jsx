@@ -40,18 +40,29 @@ const AdminModelModal = ({ onClose }) => {
 
       } else {
         // ADD
-        await axios.post(`${API}/api/models`, {
+        const res = await axios.post(`${API}/api/models`, {
           name: modelName,
           make
         });
 
-        alert("Model added ✅");
+        // ✅ NEW — backend now returns { alreadyExists, message, data } instead of
+        // silently returning the existing record. Show the user clearly whether this
+        // was a fresh add or it matched an existing model (case-insensitive, same make)
+        // e.g. typing "iPhone 12" when "iphone 12" already exists under the same make.
+        if (res.data?.alreadyExists) {
+          alert(res.data.message || `"${res.data.data?.name || modelName}" already exists under "${make}" ⚠️`);
+        } else {
+          alert("Model added ✅");
+        }
       }
 
       setModelName("");
       setMake("");
       setEditId(null);
       setSearch("");
+      // ✅ NEW — tells JobSheetPage (and anywhere else listening) that the model master
+      // list changed, so its Model dropdown can refetch immediately.
+      window.dispatchEvent(new Event("modelListUpdated"));
 
     } catch (err) {
       alert(err.response?.data?.message || "Error ❌");
@@ -97,6 +108,7 @@ const AdminModelModal = ({ onClose }) => {
       setMake("");
       setEditId(null);
       setSearch("");
+      window.dispatchEvent(new Event("modelListUpdated"));
 
     } catch {
       alert("Delete failed ❌");

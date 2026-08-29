@@ -38,18 +38,30 @@ const AdminMakeModal = ({ onClose }) => {
         alert("Updated ✅");
       } else {
         // ADD
-        await axios.post(`${API}/api/makes`, {
+        const res = await axios.post(`${API}/api/makes`, {
           name,
         });
-        alert("Make Added ✅");
+
+        // ✅ NEW — backend now returns { alreadyExists, message, data } instead of
+        // silently returning the existing record. Show the user clearly whether this
+        // was a fresh add or it matched an existing make case-insensitively
+        // (e.g. typing "Google" when "google" already exists).
+        if (res.data?.alreadyExists) {
+          alert(res.data.message || `"${res.data.data?.name || name}" already exists ⚠️`);
+        } else {
+          alert("Make Added ✅");
+        }
       }
 
       setName("");
       setSearch("");
       setEditId(null);
+      // ✅ NEW — tells JobSheetPage (and anywhere else listening) that the make master
+      // list changed, so its Make dropdown can refetch immediately.
+      window.dispatchEvent(new Event("makeListUpdated"));
 
     } catch (err) {
-      alert("Error / Already exists ❌");
+      alert(err.response?.data?.message || "Error ❌");
     }
   };
 
@@ -65,6 +77,7 @@ const AdminMakeModal = ({ onClose }) => {
       setName("");
       setSearch("");
       setEditId(null);
+      window.dispatchEvent(new Event("makeListUpdated"));
 
     } catch (err) {
       alert("Delete failed ❌");

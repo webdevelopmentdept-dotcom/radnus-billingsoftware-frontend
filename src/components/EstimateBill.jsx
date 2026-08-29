@@ -1,558 +1,533 @@
-import React, { useEffect, useState } from "react";
-import axios from "axios";
 import { useParams } from "react-router-dom";
-import logo from "../assets/logo.png";
+import { useEffect, useState } from "react";
+import axios from "axios";
+import html2pdf from "html2pdf.js";
+import Logo from "../assets/logo.png";
 
-const EstimateBill = () => {
-
+const InvoiceBill = () => {
   const { id } = useParams();
-
-  const [data, setData] = useState(null);
-  const [sending, setSending] = useState(false);
-  const params = new URLSearchParams(window.location.search);
-  const isPDF = params.get("pdf");
-
+  const [job, setJob] = useState(null);
   const API = import.meta.env.VITE_API_URL;
 
-
-  /* ================= FETCH JOB ================= */
-
   useEffect(() => {
-
     axios
       .get(`${API}/api/jobsheets/${id}`)
-      .then((res) => setData(res.data))
+      .then((res) => setJob(res.data))
       .catch((err) => console.error(err));
+  }, [id]);
 
-  }, [id, API]);
+  if (!job) return <p>Loading...</p>;
 
+  // ── ONLY Income field is used for invoice totals (spare charge excluded) ──
+  const items =
+    job.items?.length > 0
+      ? job.items
+      : [
+          {
+            make: job.device?.make,
+            model: job.device?.model,
+            imei: job.device?.imei,
+            fault: job.visualIssues?.join(", "),
+            service: job.service?.income,
+          },
+        ];
 
-  // if (!data) return <div style={{ padding: 20 }}>Loading...</div>;
+  const subTotal = items.reduce(
+    (sum, i) => sum + Number(i.service || 0),
+    0
+  );
 
-  if (!data) {
-    return (
-      <div style={{ padding: 20, fontFamily: "Segoe UI" }}>
-        Loading Estimate...
-      </div>
-    );
-  }
+  const grandTotal = subTotal;
 
+  const paymentLabel =
+    job.service?.paymentMode === "Cash"
+      ? "INVOICE BILL / CASH"
+      : job.service?.paymentMode === "UPI"
+      ? "INVOICE BILL / UPI"
+      : job.service?.paymentMode === "Card"
+      ? "INVOICE BILL / CARD"
+      : "INVOICE BILL";
 
-  const val = (v) => (v ? v : "NIL");
+  // ── Address: taluk/district merged into single line (same concept as Estimate) ──
+  const fullAddress =
+    [job.customer?.address, job.customer?.taluk, job.customer?.district]
+      .filter(Boolean)
+      .join(", ") || "-";
 
+  // ── Inspection field values (joined text, same concept as Estimate) ──
+  const physicalConditionText =
+    (job.physicalCondition || []).filter(Boolean).join(", ") || "NIL";
+  const accessoriesText =
+    (job.accessories || []).filter(Boolean).join(", ") || "NIL";
 
- const total =
-    Number(data.service?.income || 0) +
-    Number(data.service?.spareCharge || 0);
-
-  /* ================= PRINT ================= */
-
-  const handlePrint = () => {
-    window.print();
+  // ── Received Date & Delivery Date, formatted as DD/MM/YYYY ──
+  const formatDate = (d) => {
+    if (!d) return "-";
+    const dateObj = new Date(d);
+    const day = String(dateObj.getDate()).padStart(2, "0");
+    const month = String(dateObj.getMonth() + 1).padStart(2, "0");
+    const year = dateObj.getFullYear();
+    return `${day}/${month}/${year}`;
   };
 
+  // ================= FIX =================
+  // 🔴 BUG FIX: "Received Date" was showing job.service?.repairDate, which is a
+  // manually-editable field on the Job Sheet (engineers can change it any time).
+  // That made Invoice's "Received Date" drift from reality. It should instead show
+  // the actual date the job sheet was first saved/created in the system — the same
+  // concept EstimateBill already uses via data.createdAt. Now both documents agree.
+  const receivedDateText = formatDate(job.createdAt);
+  const deliveryDateText = formatDate(job.service?.deliveryDate);
 
-  /* ================= EMAIL ================= */
-
-  const handleEmail = async () => {
-
-    try {
-
-      setSending(true);
-
-      await axios.post(`${API}/api/jobsheets/send-estimate/${id}`);
-
-      alert("Email sent successfully ✅");
-
-    } catch (err) {
-
-      console.error(err);
-
-      alert("Email failed ❌");
-
-    } finally {
-
-      setSending(false);
-
-    }
-
+  // ── FIX: previously called html2pdf().from(element).save() with ZERO
+  // options. That uses html2pdf's default "legacy" pagebreak mode, which
+  // screenshots the whole element and slices the image into fixed 297mm
+  // chunks with no awareness of the DOM — any box/table row/section that
+  // straddles a slice boundary gets cut mid-element and shows up as
+  // overlapping/duplicated content across the page break. Also the
+  // container previously had height:"297mm" + overflow:"hidden", which
+  // silently clipped anything that didn't fit instead of flowing to a
+  // second page.
+  // Now: container grows naturally (minHeight instead of fixed height,
+  // overflow visible), and html2pdf is given explicit "css" pagebreak
+  // mode with .avoid-break sections so a box/row is pushed whole onto the
+  // next page instead of being sliced through the middle.
+  const downloadPDF = () => {
+    const element = document.getElementById("invoice");
+    const opt = {
+      margin: 0,
+      filename: `Invoice-${job.jobSheetNo}.pdf`,
+      image: { type: "jpeg", quality: 0.98 },
+      html2canvas: {
+        scale: 2,
+        useCORS: true,
+        windowWidth: element.scrollWidth,
+      },
+      jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+      pagebreak: { mode: ["css", "legacy"], avoid: ["tr", ".avoid-break"] },
+    };
+    html2pdf().from(element).set(opt).save();
   };
-
-
-  const btn = {
-    padding: "10px 22px",
-    border: "none",
-    borderRadius: "6px",
-    background: "#000",
-    color: "#fff",
-    cursor: "pointer",
-    fontWeight: 600,
-  };
-
-
-  const condLabel = {
-    border: "1px solid #ddd",
-    padding: "8px",
-    fontWeight: 600,
-    background: "#f4f4f4",
-    width: "20%",
-  };
-
-
-  const condValue = {
-    border: "1px solid #ddd",
-    padding: "8px",
-    width: "30%",
-  };
-
-  /* ================= INSPECTION LABELS =================
-     Plain coloured text — no chip/pill background or border. */
-  const chipWrap = { display: "flex", flexWrap: "wrap", gap: 10 };
-  const chipBase = {
-    display: "inline-block",
-    fontSize: "13px",
-    fontWeight: 700,
-    whiteSpace: "nowrap",
-  };
-  const chipFault = { ...chipBase, color: "#7F1D1D" };
-  const chipPhysical = { ...chipBase, color: "#78350F" };
-  const chipAccessory = { ...chipBase, color: "#1E3A8A" };
-  const chipNil = { ...chipBase, color: "#111827" };
-
-  const renderChips = (list, chipStyle) => {
-    const items = (list || []).filter(Boolean);
-    if (items.length === 0) {
-      return <span style={chipNil}>NIL</span>;
-    }
-    return items.map((item, i) => (
-      <span key={i} style={chipStyle}>{item}</span>
-    ));
-  };
-
 
   return (
     <>
+      <style>
+        {`
+        @media print {
+          body { margin:0 }
+          .no-print{ display:none }
+        }
+        /* Keep these blocks intact across a page slice instead of being
+           cut through the middle (this is what was showing as "overlap"). */
+        .avoid-break {
+          page-break-inside: avoid;
+          break-inside: avoid;
+        }
+        `}
+      </style>
 
-      <style>{`
+      <div
+        id="invoice"
+        style={{
+          width: "210mm",
+          minHeight: "297mm",
+          padding: "18px",
+          margin: "auto",
+          border: "2px solid #000",
+          fontSize: "12px",
+          lineHeight: "1.4",
+          overflow: "visible",
+          fontFamily: "system-ui, -apple-system, Segoe UI, Roboto",
+          position: "relative",
+          background: "#fff",
+        }}
+      >
+        {/* WATERMARK */}
 
-@page{
-size:A4;
-margin:0;
-}
+        <img
+          src={Logo}
+          style={{
+            position: "absolute",
+            top: "50%",
+            left: "50%",
+            transform: "translate(-50%,-50%)",
+            opacity: 0.05,
+            width: "420px",
+            pointerEvents: "none",
+          }}
+        />
 
-body{
-margin:0;
-font-family:'Segoe UI',sans-serif;
-background:#f5f7fa;
--webkit-print-color-adjust: exact;
-print-color-adjust: exact;
-}
+        {/* HEADER */}
 
-.wrapper{
-display:flex;
-justify-content:center;
-padding:30px 0;
-}
+        <div
+          className="avoid-break"
+          style={{ borderBottom: "2px solid #000", paddingBottom: "10px" }}
+        >
 
-.a4{
-width:210mm;
-height:297mm;
-padding:15mm;
-box-sizing:border-box;
-background:#fff;
-box-shadow:0 10px 25px rgba(0,0,0,0.08);
-border-radius:8px;
-position:relative;
-color:#111;
-}
+          {/* COMPANY NAME + ADDRESS — TOP CENTER */}
+          <div style={{ textAlign: "center", marginBottom: "20px" }}>
+            <h2 style={{ margin: "4px 0", letterSpacing: "1px", fontSize: "16px" }}>
+              RADNUS COMMUNICATION
+            </h2>
 
-.watermark{
-position:absolute;
-top:45%;
-left:50%;
-transform:translate(-50%,-50%) rotate(-30deg);
-font-size:90px;
-color:rgba(0,0,0,0.04);
-font-weight:bold;
-}
-
-/* ================= COMPANY HEADING — CENTERED ABOVE LOGO ================= */
-.company-heading{
-text-align:center;
-font-size:22px;
-font-weight:800;
-color:#000;
-letter-spacing:0.4px;
-margin-bottom:10px;
-}
-
-.header{
-display:grid;
-grid-template-columns:1fr auto 1fr;
-align-items:start;
-border-bottom:2px solid #000;
-padding-bottom:12px;
-margin-bottom:20px;
-color:#000;
-}
-
-.sub, .sub a, .sub span{
-font-size:12.5px;
-line-height:1.7;
-color:#000 !important;
-font-weight:500;
-text-decoration:none;
-}
-
-/* ================= LOGO — MOVED SLIGHTLY DOWN ================= */
-.logo-box{
-text-align:center;
-margin-top:18px;
-}
-
-.logo-box img{
-height:60px;
-}
-
-.job-box{
-justify-self:end;
-color:#000;
-}
-
-.job-title{
-text-align:center;
-font-weight:800;
-margin-bottom:6px;
-color:#000;
-}
-
-.job-box table{
-font-size:12.5px;
-border-collapse:collapse;
-color:#000;
-}
-
-.job-box td{
-padding:2px 6px;
-color:#000;
-}
-
-.section{
-margin-bottom:18px;
-}
-
-.section-title{
-font-size:14px;
-font-weight:700;
-margin-bottom:8px;
-color:#000;
-border-left:4px solid #000;
-padding-left:8px;
-text-transform:uppercase;
-}
-
-.box{
-border:1px solid #ccc;
-padding:12px;
-border-radius:8px;
-font-size:14px;
-background:#fafafa;
-color:#000;
-}
-
-.grid{
-display:flex;
-gap:15px;
-}
-
-.grid > div{
-flex:1;
-}
-
-.estimate-box{
-border:2px dashed #000;
-padding:10px;
-font-size:16px;
-background:#f9f9f9;
-color:#000;
-}
-
-.sign-row{
-display:flex;
-justify-content:space-between;
-margin-top:30px;
-}
-
-.sign-box{
-width:30%;
-text-align:center;
-}
-
-.sign-line{
-height:50px;
-border-bottom:1px solid #000;
-margin-bottom:6px;
-}
-
-.sign-label{
-font-size:13px;
-font-weight:600;
-color:#000;
-}
-
-.no-print{
-text-align:center;
-margin-top:20px;
-}
-
-@media print{
-body{background:#fff}
-.wrapper{padding:0}
-.a4{height:297mm;overflow:hidden}
-.no-print{display:none}
-}
-
-`}</style>
-
-
-      <div className="wrapper">
-
-        <div className="a4">
-
-          <div className="watermark">RADNUS</div>
-
-          {/* ================= COMPANY HEADING — CENTERED ABOVE LOGO ================= */}
-          <div className="company-heading">RADNUS COMMUNICATION</div>
-
-          {/* HEADER */}
-
-          <div className="header">
-
-            <div className="sub">
-  242, Sinnaya Plaza, MG Road,<br />
-  Puducherry - 605001<br />
-  Phone: 81222 73355, 99409 73030<br />
-  98944 36987<br />
-  Mon–Sat (10AM–7PM)<br />
-  Website: www.radnus.in
-</div>
-
-
-            <div className="logo-box">
-              <img src={logo} alt="logo" />
-            </div>
-
-
-            <div className="job-box">
-
-              <div className="job-title">JOB SHEET</div>
-
-              <table>
-                <tbody>
-
-                  <tr>
-                    <td><b>Job No</b></td>
-                    <td>:</td>
-                    <td>{val(data.jobSheetNo)}</td>
-                  </tr>
-
-                  <tr>
-                    <td><b>Created</b></td>
-                    <td>:</td>
-                    <td>{val(data.createdAt?.slice(0, 10))}</td>
-                  </tr>
-
-                  <tr>
-                    <td><b>Delivery</b></td>
-                    <td>:</td>
-                    <td>{val(data.service?.deliveryDate?.slice(0, 10))}</td>
-                  </tr>
-
-                  <tr>
-                    <td><b>Engineer</b></td>
-                    <td>:</td>
-                    <td>{val(data.service?.engineer)}</td>
-                  </tr>
-
-                </tbody>
-              </table>
-
-            </div>
+            <p style={{ fontSize: "14px", margin: 0 }}>
+              242, Sinnaya Plaza, MG Road, Puducherry - 605001
+            </p>
           </div>
 
-
-          {/* CUSTOMER + DEVICE */}
-
-          <div className="grid section">
-
+          {/* LOGO + INVOICE BILL (left) + CONTACT INFO (right) */}
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "flex-start",
+              fontSize: "11px",
+              marginTop: "10px",
+            }}
+          >
             <div>
-
-              <div className="section-title">Customer</div>
-
-              {/* ================= CUSTOMER BOX — TALUK/DISTRICT MERGED INTO ADDRESS (FIX) =================
-                  🔴 FIX: Taluk and District were shown as separate lines below Address.
-                  Now they're combined into the single Address line — e.g.
-                  "Address: 12 Main St, Villianur, Puducherry" — matching how it's
-                  actually filled on the Job Sheet. Empty parts are skipped automatically. */}
-              <div className="box">
-                Name: {val(data.customer?.name)}<br />
-                Phone: {val(data.customer?.contact)}<br />
-                Email: {val(data.customer?.email)}<br />
-                Address: {[data.customer?.address, data.customer?.taluk, data.customer?.district].filter(Boolean).join(", ") || "NIL"}
-              </div>
-
+              <b>{paymentLabel}</b>
             </div>
-
-
-            <div>
-
-              <div className="section-title">Device</div>
-
-              <div className="box">
-                Brand: {val(data.device?.make)}<br />
-                Model: {val(data.device?.model)}<br />
-                IMEI: {val(data.device?.imei)}
-              </div>
-
+            <div style={{ textAlign: "center", marginLeft: "80px" }}>
+              <img src={Logo} style={{ height: "60px", display: "block", margin: "0 auto", marginTop: "20px" }} />
             </div>
+            <table
+              style={{
+                fontSize: "13px",
+                marginRight: "20px",
+                borderSpacing: "0 6px",
+                borderCollapse: "separate",
+              }}
+            >
+              <tbody>
+                <tr>
+                  <td style={{ fontWeight: "bold", paddingRight: "6px", verticalAlign: "top" }}>
+                    PHONE NO
+                  </td>
+                  <td style={{ verticalAlign: "top" }}>:</td>
+                  <td style={{ paddingLeft: "6px", lineHeight: "1.6" }}>
+                    81222 73355 &nbsp;&nbsp; 99409 73030 <br />
+                    98944 36987
+                  </td>
+                </tr>
 
+                <tr>
+                  <td style={{ fontWeight: "bold", paddingRight: "6px" }}>
+                    EMAIL
+                  </td>
+                  <td>:</td>
+                  <td style={{ paddingLeft: "6px" }}>radnus@gmail.com</td>
+                </tr>
+
+                <tr>
+                  <td style={{ fontWeight: "bold", paddingRight: "6px" }}>
+                    TIMINGS
+                  </td>
+                  <td>:</td>
+                  <td style={{ paddingLeft: "6px" }}>10 AM to 7 PM</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* CUSTOMER + BILL (left)  ──  INSPECTION DETAILS (right) */}
+
+        <div
+          className="avoid-break"
+          style={{
+            marginTop: "12px",
+            fontSize: "12px",
+            lineHeight: "1.3",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-start",
+          }}
+        >
+          {/* LEFT SIDE — CUSTOMER + BILL */}
+          <div>
+            {/* CUSTOMER */}
+
+            <table style={{ fontSize: "14px", lineHeight: "1.8" }}>
+              <tbody>
+                <tr>
+                  <td style={{ fontWeight: "bold", width: "110px", whiteSpace: "nowrap" }}>Customer</td>
+                  <td style={{ paddingLeft: "4px" }}>:</td>
+                  <td style={{ paddingLeft: "8px" }}>{job.customer?.name}</td>
+                </tr>
+
+                <tr>
+                  <td style={{ fontWeight: "bold", width: "110px", whiteSpace: "nowrap" }}>Contact</td>
+                  <td style={{ paddingLeft: "4px" }}>:</td>
+                  <td style={{ paddingLeft: "8px" }}>{job.customer?.contact}</td>
+                </tr>
+
+                <tr>
+                  <td style={{ fontWeight: "bold", width: "110px", whiteSpace: "nowrap" }}>Address</td>
+                  <td style={{ paddingLeft: "4px" }}>:</td>
+                  <td style={{ paddingLeft: "8px" }}>{fullAddress}</td>
+                </tr>
+              </tbody>
+            </table>
+
+            {/* BILL */}
+
+            <table style={{ fontSize: "14px", lineHeight: "1.8", marginTop: "8px" }}>
+              <tbody>
+                <tr>
+                  <td style={{ fontWeight: "bold", width: "110px", whiteSpace: "nowrap" }}>Bill No</td>
+                  <td style={{ paddingLeft: "4px" }}>:</td>
+                  <td style={{ paddingLeft: "8px" }}>{job.jobSheetNo}</td>
+                </tr>
+
+                <tr>
+                  <td style={{ fontWeight: "bold", width: "110px", whiteSpace: "nowrap" }}>Received Date</td>
+                  <td style={{ paddingLeft: "4px" }}>:</td>
+                  <td style={{ paddingLeft: "8px" }}>{receivedDateText}</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
 
-          {/* ================= INSPECTION DETAILS =================
-              Visual Inspection (faults), Physical Condition, Accessories Received —
-              plain coloured labels (no chip/pill background or border). */}
-          <div className="section">
+          {/* RIGHT SIDE — INSPECTION DETAILS */}
+          <table
+            style={{
+              fontSize: "14px",
+              lineHeight: "1.8",
+              borderSpacing: "0 10px",
+              borderCollapse: "separate",
+              marginRight: "160px",
+            }}
+          >
+            <tbody>
+              <tr>
+                <td style={{ fontWeight: "bold", width: "160px", whiteSpace: "nowrap" }}>Physical Condition</td>
+                <td style={{ paddingLeft: "4px" }}>:</td>
+                <td style={{ paddingLeft: "8px" }}>{physicalConditionText}</td>
+              </tr>
 
-            <div className="section-title">Inspection Details</div>
+              <tr>
+                <td style={{ fontWeight: "bold", width: "160px", whiteSpace: "nowrap" }}>Accessories Received</td>
+                <td style={{ paddingLeft: "4px" }}>:</td>
+                <td style={{ paddingLeft: "8px" }}>{accessoriesText}</td>
+              </tr>
 
-            <div className="grid">
+              <tr>
+                <td style={{ fontWeight: "bold", width: "160px", whiteSpace: "nowrap" }}>Delivery Date</td>
+                <td style={{ paddingLeft: "4px" }}>:</td>
+                <td style={{ paddingLeft: "8px" }}>{deliveryDateText}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
 
-              <div>
-                <div style={{ fontSize: 12, fontWeight: 800, color: "#000", marginBottom: 6 }}>
-                  Visual Inspection
-                </div>
-                <div className="box" style={chipWrap}>
-                  {renderChips(data.visualIssues, chipFault)}
-                </div>
-              </div>
+        {/* TABLE */}
 
-              <div>
-                <div style={{ fontSize: 12, fontWeight: 800, color: "#000", marginBottom: 6 }}>
-                  Physical Condition
-                </div>
-                <div className="box" style={chipWrap}>
-                  {renderChips(data.physicalCondition, chipPhysical)}
-                </div>
-              </div>
+        <table
+          style={{
+            width: "100%",
+            borderCollapse: "collapse",
+            marginTop: "16px",
+            fontSize: "14px",
+          }}
+        >
+          <thead>
+            <tr style={{ background: "#f3f3f3" }}>
+              {["Make", "Model", "IMEI", "Fault", "Total"].map(
+                (h, i) => (
+                  <th key={i} style={th}>
+                    {h}
+                  </th>
+                )
+              )}
+            </tr>
+          </thead>
 
-              <div>
-                <div style={{ fontSize: 12, fontWeight: 800, color: "#000", marginBottom: 6 }}>
-                  Accessories Received
-                </div>
-                <div className="box" style={chipWrap}>
-                  {renderChips(data.accessories, chipAccessory)}
-                </div>
-              </div>
+          <tbody>
+            {items.map((item, i) => (
+              <tr key={i} className="avoid-break">
+                <td style={td}>{item.make || "-"}</td>
+                <td style={td}>{item.model || "-"}</td>
+                <td style={td}>{item.imei || "-"}</td>
+                <td style={td}>{item.fault || "-"}</td>
+                <td style={td}>
+                  ₹ {Number(item.service || 0).toFixed(2)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
 
+        {/* TOTAL */}
+
+        <div className="avoid-break" style={{ textAlign: "right", marginTop: "6px", fontSize: "12px" }}>
+          <div style={{ marginBottom: "6px" }}>Sub Total : ₹{subTotal}</div>
+          <b>Grand Total : ₹{grandTotal.toFixed(2)}</b>
+        </div>
+
+        {/* REMARKS */}
+        {job.service?.remarks && (
+          <div className="avoid-break" style={{ marginTop: "20px" }}>
+            <div style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              marginBottom: "8px"
+            }}>
+              <div style={{
+                width: "4px",
+                height: "18px",
+                background: "#2c2c2c",
+                borderRadius: "2px"
+              }} />
+              <span style={{ fontWeight: "700", fontSize: "13px", letterSpacing: "1px" }}>
+                REMARKS
+              </span>
             </div>
 
+            <div style={{
+              border: "1px solid #d0d0d0",
+              borderLeft: "4px solid #2c2c2c",
+              borderRadius: "4px",
+              background: "#f9f9f9",
+              whiteSpace: "pre-wrap",
+              color: "#222",
+              marginTop: "10px",
+              fontSize: "11px",
+              padding: "8px 10px",
+              lineHeight: "1.5",
+            }}>
+              {job.service.remarks}
+            </div>
+          </div>
+        )}
+
+        {/* TERMS */}
+
+        <div style={{ marginTop: "25px" }}>
+          <div style={{ fontWeight: "bold", fontSize: "13px", marginBottom: "6px" }}>
+            TERMS & CONDITIONS
           </div>
 
-
-          {/* ESTIMATE */}
-
-          <div className="section">
-
-            <div className="section-title">Estimate Amount</div>
-
-            <div className="estimate-box">
-
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-             <span>Service Charge</span>
-<span>₹ {data.service?.income || 0}</span>
-              </div>
-
-              <div style={{ display: "flex", justifyContent: "space-between", marginTop: 5 }}>
-                <span>Spare Charge</span>
-                <span>₹ {data.service?.spareCharge || 0}</span>
-              </div>
-
-              <hr />
-
-              <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold" }}>
-                <span>Total Estimate</span>
-                <span>₹ {total}</span>
-              </div>
-
-            </div>
-
-          </div>
-{/* REMARKS */}
-{data.service?.remarks && (
-  <div className="section">
-    <div className="section-title">Remarks</div>
-    <div style={{
-      border: "1px solid #d0d0d0",
-      borderLeft: "4px solid #2c2c2c",
-      borderRadius: "4px",
-      padding: "12px 16px",
-      background: "#f9f9f9",
-      fontSize: "13px",
-      lineHeight: "1.7",
-      whiteSpace: "pre-wrap",
-      color: "#222"
-    }}>
-      {data.service.remarks}
-    </div>
-  </div>
-)}
-
-          {/* SIGN */}
-
-          <div className="sign-row">
-
-            <div className="sign-box">
-              <div className="sign-line"></div>
-              <div className="sign-label">Customer Signature</div>
-            </div>
-
-            <div className="sign-box">
-              <div className="sign-line"></div>
-              <div className="sign-label">For RADNUS</div>
-            </div>
-
-            <div className="sign-box">
-              <div className="sign-line"></div>
-              <div className="sign-label">Authorized Signatory</div>
-            </div>
-
+          <div
+            className="avoid-break"
+            style={{
+              border: "1px solid #ccc",
+              borderRadius: "4px",
+              background: "#fafafa",
+              marginTop: "12px",
+              fontSize: "11px",
+              padding: "8px",
+              lineHeight: "1.4",
+            }}
+          >
+            <ol style={{ margin: 0, paddingLeft: "16px" }}>
+              <li style={{  marginBottom: "6px" }}>Replaced parts will not be returned.</li>
+              <li style={{  marginBottom: "6px" }}>Data may be lost during repair/software upgradation.</li>
+              <li style={{ marginBottom: "6px" }}>
+                Company bears no responsibility, whatsoever if equipment is not
+                collected within 45 days from the date of receipt.
+              </li>
+              <li style={{  marginBottom: "6px" }}>
+                Please make sure that you have removed your sim card and/or memory
+                card from your phone. Gadget hub does not accept responsibility
+                for loss of these items.
+              </li>
+              <li style={{  marginBottom: "6px" }}>
+                No delivery will be made without the customer's copy of the job order.
+              </li>
+              <li style={{  marginBottom: "6px" }}>
+                Company bears no responsibility, if any fault occurs on additional
+                fault findings while servicing on booked complaints.
+              </li>
+              <li style={{ lineHeight: "1.9" }}>Only checking warranty for all services and spares used.</li>
+            </ol>
           </div>
 
+          {/* TAMIL */}
 
+          <div style={{ fontWeight: "bold", marginTop: "15px", fontSize: "13px" }}>
+            விதிமுறைகள்
+          </div>
+
+          <div
+            className="avoid-break"
+            style={{
+              border: "1px solid #ccc",
+              borderRadius: "4px",
+              padding: "10px",
+              background: "#fafafa",
+              fontSize: "11px",
+              lineHeight: "1.5",
+            }}
+          >
+            <ol style={{ margin: 0, paddingLeft: "16px" }}>
+              <li style={{ lineHeight: "1.9", marginBottom: "6px" }}>மாற்றப்பட்ட உதிரிப்பாகங்கள் திருப்பி வழங்கப்படமாட்டாது.</li>
+              <li style={{ lineHeight: "1.9", marginBottom: "6px" }}>
+                பழுது பார்க்கும்போது / சாப்ட்வேர் அப்டேட் செய்யும் போது தகவல்கள்
+                இழக்க நேரிடலாம்.
+              </li>
+              <li style={{ lineHeight: "1.9", marginBottom: "6px" }}>
+                பெறப்பட்ட நாளிலிருந்து 45 நாட்களுக்குள் பொருள் பெறப்படாவிட்டால்
+                நிறுவனம் பொறுப்பல்ல.
+              </li>
+              <li style={{ lineHeight: "1.9", marginBottom: "6px" }}>
+                தயவுசெய்து உங்கள் சிம் கார்டு மற்றும் மெமரி கார்டை அகற்றி வழங்கவும்.
+              </li>
+              <li style={{ lineHeight: "1.9", marginBottom: "6px" }}>வேலை ஒப்பந்த நகல் இல்லாமல் பொருள் வழங்கப்படமாட்டாது.</li>
+              <li style={{ lineHeight: "1.9", marginBottom: "6px" }}>
+                சரிசெய்யும் போது புதிய குறைகள் ஏற்பட்டால் நிறுவனம் பொறுப்பல்ல.
+              </li>
+              <li style={{ lineHeight: "1.9" }}>
+                சேவை மற்றும் உதிரிப்பாகங்களுக்கு மட்டுமே உத்தரவாதம் வழங்கப்படும்.
+              </li>
+            </ol>
+          </div>
+        </div>
+
+        {/* SIGN */}
+
+        <div className="avoid-break" style={{ textAlign: "right", marginTop: "20px" }}>
+          Authorized Signature
         </div>
       </div>
 
-      {!isPDF && (
-        <div className="no-print">
+      {/* BUTTONS */}
 
-          <button onClick={handlePrint} style={btn}>
-            🖨 Print / Download
-          </button>
+      <div className="no-print" style={{ textAlign: "center", marginTop: "15px" }}>
+        <button onClick={() => window.print()}>🖨 Print</button>
 
-          <button
-            onClick={handleEmail}
-            style={{ ...btn, marginLeft: 10 }}
-            disabled={sending}
-          >
-            {sending ? "Sending..." : "📧 Send Email"}
-          </button>
+        <button onClick={downloadPDF} style={{ marginLeft: "10px" }}>
+          📥 Download PDF
+        </button>
 
-        </div>
-      )}
-
+        <button
+          style={{ marginLeft: "10px" }}
+          onClick={async () => {
+            try {
+              await axios.post(`${API}/api/jobsheets/send-invoice/${job._id}`);
+              alert("Invoice Sent Successfully ✅");
+            } catch {
+              alert("Email Failed ❌");
+            }
+          }}
+        >
+          📧 Send Email
+        </button>
+      </div>
     </>
   );
 };
 
-export default EstimateBill;
-//---end----
+const th = {
+  border: "1px solid #000",
+  padding: "8px",
+  fontSize: "13px",
+};
+
+const td = {
+  border: "1px solid #000",
+  padding: "8px",
+};
+
+export default InvoiceBill;
