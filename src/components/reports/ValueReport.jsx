@@ -1,5 +1,3 @@
-
-
 import React, { useState, useEffect } from "react";
 import axios from "axios";
 import * as XLSX from "xlsx";
@@ -149,7 +147,12 @@ const buildRows = (jobsheets) => {
         return { date: d, ...b, rowTotal: b.service + b.spare + b.income + b.others };
       }).filter((r) => r.rowTotal > 0);
 
-      const balanceableTotal = dateRows.reduce((s, r) => s + r.service + r.income, 0);
+      // ✅ FIX: Service ₹ already IS the collected/labour value for that transaction —
+      // Income ₹ is just the same money re-shown as the "total collected" figure
+      // (income = service + spare + others, set by the auto-calc on JobSheetPage).
+      // Adding service + income here was double-counting the same rupee twice.
+      // Only "service" should feed into the balanceable/collected & pending-balance total.
+      const balanceableTotal = dateRows.reduce((s, r) => s + r.service, 0);
       const jobTotal = dateRows.reduce((s, r) => s + r.rowTotal, 0);
 
       // ── Advance events ──
@@ -190,7 +193,9 @@ const buildRows = (jobsheets) => {
 
         if (e.kind === "charge") {
           const rowKey = `entry-${jobSheetNo}-${e.date}-service`;   // ✅ exact ID stored here
-          const balanceablePart = e.service + e.income;
+          // ✅ FIX: was `e.service + e.income` (double-counted the same collected amount).
+          // "service" alone is the correct collectible value for this transaction.
+          const balanceablePart = e.service;
           const immediatePart   = e.spare + e.others;
       rows.push({
             date: e.date, jobSheetNo, name,
@@ -624,22 +629,6 @@ const subBalance   = rows.reduce((s, r) => s + (r.balance ?? 0),   0);
   </div>
 )}
 </td>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
                             <td style={{ ...td, textAlign: "right", fontWeight: 700, color: "#15803d" }}>
                               {(row.collected || 0) > 0 ? `₹ ${row.collected.toFixed(2)}` : "-"}
                             </td>
