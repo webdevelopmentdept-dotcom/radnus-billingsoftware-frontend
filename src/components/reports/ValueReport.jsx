@@ -12,18 +12,22 @@ const ValueReport = () => {
   const [toDate, setToDate] = useState(today);
   const [searchText, setSearchText] = useState("");   // ✅ NEW — Job No / Name search
 
-  /* ================= DATE TYPE FILTER (NEW) =================
-     🔴 FIX — Before, From/To filtered by the TRANSACTION date (revenueEntries /
-     spareItems / othersItems date). That's the date a charge was entered, not
-     necessarily the date the shop actually thinks of the job by — so selecting
-     a date range often didn't show jobs the user expected to see there.
-     Now the user explicitly picks WHICH date drives the filter:
-       - "received"  → service.repairDate (device intake date)
-       - "delivery"  → service.deliveryDate
-       - "created"   → job.createdAt (job sheet creation date)
-     Every row of a job carries all three, so switching the dropdown re-filters
-     instantly without re-fetching. */
-  const [dateFilterType, setDateFilterType] = useState("received"); // "received" | "delivery" | "created"
+  /* ================= DATE TYPE FILTER =================
+     "received"    → service.repairDate (device intake date)
+     "delivery"    → service.deliveryDate
+     "created"     → job.createdAt (job sheet creation date)
+     "transaction" → row.date (the entry's OWN date — revenueEntries/spareItems/
+                     othersItems/advance date). ✅ NEW — this is the one to use
+                     for month-wise revenue reports that must include rebills:
+                     each transaction (Aug entry, Sep rebill entry, etc.) files
+                     under the month IT actually happened in, regardless of when
+                     the job sheet itself was created/received/delivered. The
+                     other three types are job-level (same date for every row of
+                     that job), so a rebilled job can vanish entirely from a
+                     month's report if that job's created/received/delivery date
+                     falls outside the range — "Transaction Date" never has that
+                     problem since it filters row-by-row. */
+  const [dateFilterType, setDateFilterType] = useState("received"); // "received" | "delivery" | "created" | "transaction"
 
   const [data, setData] = useState([]);
  const [loading, setLoading] = useState(false);
@@ -41,7 +45,7 @@ const ValueReport = () => {
       return;
     }
 
-    // ✅ FIX — Filter ippo dateFilterType (Received/Delivery/Created) base
+    // ✅ FIX — Filter ippo dateFilterType (Received/Delivery/Created/Transaction) base
     // pannirukku, aana jump panna vendiya entry-oda "date" idhu txn date
     // (revenueEntries date) — rendum vera date field, so range expand panni
     // guess panradhu unreliable. Simple-ah From/To clear pannitu — andha entry
@@ -263,12 +267,14 @@ const buildRows = (jobsheets) => {
     return rows;
   };
 
-  // ✅ NEW — picks which date field on a row to filter by, based on dateFilterType.
+  // ✅ picks which date field on a row to filter by, based on dateFilterType.
   // "delivery" rows without a real delivery date ("-") are treated as no-date
   // (excluded from a delivery-date range filter, same as before delivery happens).
+  // "transaction" → row.date, the entry's OWN date (see dateFilterType comment above).
   const getFilterDate = (row) => {
-    if (dateFilterType === "created")  return row.createdAt || "";
-    if (dateFilterType === "delivery") return (row.deliveryDate && row.deliveryDate !== "-") ? row.deliveryDate : "";
+    if (dateFilterType === "created")     return row.createdAt || "";
+    if (dateFilterType === "delivery")    return (row.deliveryDate && row.deliveryDate !== "-") ? row.deliveryDate : "";
+    if (dateFilterType === "transaction") return row.date || "";
     return row.repairDate || ""; // "received" (default)
   };
 
@@ -287,10 +293,12 @@ const buildRows = (jobsheets) => {
     }
 
     if (!fromDate && !toDate) return visible;
-    // ✅ FIX — filter now uses the SELECTED date type (Received/Delivery/Created),
-    // not the transaction date. This is what was causing jobs to "disappear"
-    // when picking a date range — the row's txn date and the job's real
-    // received/delivery/created date weren't always the same day.
+    // ✅ FIX — filter now uses the SELECTED date type (Received/Delivery/Created/
+    // Transaction), not always the transaction date. This is what was causing
+    // jobs to "disappear" when picking a date range — the row's txn date and
+    // the job's real received/delivery/created date weren't always the same day.
+    // Pick "Transaction Date" for month-wise revenue reports that must include
+    // rebills split across months (see dateFilterType comment above).
     return visible.filter((row) => {
       const d = getFilterDate(row);
       if (!d) return false;
@@ -325,9 +333,10 @@ const grandAdvance   = allRows.reduce((s, r) => s + r.advance,          0);
 const grandCollected = allRows.reduce((s, r) => s + (r.collected || 0), 0);
 const grandPending   = allRows.reduce((s, r) => s + (r.balance ?? 0),   0);
 
-  // ✅ NEW — human label for whichever date type is active, used in the UI + Excel filename
+  // ✅ human label for whichever date type is active, used in the UI + Excel filename
   const dateTypeLabel = dateFilterType === "created" ? "Created Date"
     : dateFilterType === "delivery" ? "Delivery Date"
+    : dateFilterType === "transaction" ? "Transaction Date"
     : "Received Date";
 
   /* ================= EXCEL DOWNLOAD ================= */
@@ -464,7 +473,7 @@ excelRows.push({
           />
         </div>
 
-        {/* ✅ NEW — Date Type selector: Received / Delivery / Created */}
+        {/* ✅ Date Type selector: Received / Delivery / Created / Transaction */}
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <label style={{ fontSize: 12, color: "#64748b", fontWeight: 600 }}>DATE TYPE</label>
           <select
@@ -472,6 +481,7 @@ excelRows.push({
             onChange={(e) => setDateFilterType(e.target.value)}
             style={{ border: "1px solid #cbd5e1", borderRadius: 6, padding: "5px 8px", fontSize: 13, fontWeight: 600, color: "#1e293b" }}
           >
+            <option value="transaction">Transaction Date (recommended for monthly revenue)</option>
             <option value="received">Received Date</option>
             <option value="delivery">Delivery Date</option>
             <option value="created">Created Date</option>
@@ -561,7 +571,7 @@ excelRows.push({
             {allRows.filter(r => r.type === "advance").length} advance entries
           </span>
           <span style={{ fontSize: 12, color: "#94a3b8" }}>
-            {/* ✅ NEW — shows which date field is currently driving the filter */}
+            {/* shows which date field is currently driving the filter */}
             Filtered by <b style={{ color: "#334155" }}>{dateTypeLabel}</b>:{" "}
             {fromDate || toDate ? `${fromDate || "All"} → ${toDate || "All"}` : "All Dates"}
           </span>
