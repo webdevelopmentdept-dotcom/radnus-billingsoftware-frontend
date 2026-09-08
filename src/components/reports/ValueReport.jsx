@@ -10,6 +10,21 @@ const ValueReport = () => {
   const today = new Date().toISOString().split("T")[0];
   const [fromDate, setFromDate] = useState(today);
   const [toDate, setToDate] = useState(today);
+  const [searchText, setSearchText] = useState("");   // ✅ NEW — Job No / Name search
+
+  /* ================= DATE TYPE FILTER (NEW) =================
+     🔴 FIX — Before, From/To filtered by the TRANSACTION date (revenueEntries /
+     spareItems / othersItems date). That's the date a charge was entered, not
+     necessarily the date the shop actually thinks of the job by — so selecting
+     a date range often didn't show jobs the user expected to see there.
+     Now the user explicitly picks WHICH date drives the filter:
+       - "received"  → service.repairDate (device intake date)
+       - "delivery"  → service.deliveryDate
+       - "created"   → job.createdAt (job sheet creation date)
+     Every row of a job carries all three, so switching the dropdown re-filters
+     instantly without re-fetching. */
+  const [dateFilterType, setDateFilterType] = useState("received"); // "received" | "delivery" | "created"
+
   const [data, setData] = useState([]);
  const [loading, setLoading] = useState(false);
   const [highlightKey, setHighlightKey] = useState(null);
@@ -26,14 +41,13 @@ const ValueReport = () => {
       return;
     }
 
-    // Illana — date filter range-ah expand pannunga, andha date cover aaganum
-    let newFrom = fromDate;
-    let newTo = toDate;
-    if (fromDate && date < fromDate) newFrom = date;
-    if (toDate && date > toDate) newTo = date;
-
-    if (newFrom !== fromDate) setFromDate(newFrom);
-    if (newTo !== toDate) setToDate(newTo);
+    // ✅ FIX — Filter ippo dateFilterType (Received/Delivery/Created) base
+    // pannirukku, aana jump panna vendiya entry-oda "date" idhu txn date
+    // (revenueEntries date) — rendum vera date field, so range expand panni
+    // guess panradhu unreliable. Simple-ah From/To clear pannitu — andha entry
+    // certain-ah visible aagum-nu guarantee pandrom.
+    if (fromDate) setFromDate("");
+    if (toDate) setToDate("");
 
     // Filter maarina pinnadi table re-render aagum, appuram jump pannanum
     setPendingJump(id);
@@ -99,6 +113,8 @@ const buildRows = (jobsheets) => {
       const jobSheetNo   = item.jobSheetNo || "";
       const repairDate   = item.service?.repairDate?.slice(0, 10) || "";
       const deliveryDate = item.service?.deliveryDate?.slice(0, 10) || "-";
+      // ✅ NEW — job-level "Created Date", used by the Date Type filter.
+      const createdAt    = item.createdAt ? new Date(item.createdAt).toISOString().slice(0, 10) : "";
 
       const revenueEntries = item.service?.revenueEntries || [];
       const advanceItems   = item.service?.advanceItems || [];
@@ -205,7 +221,7 @@ const buildRows = (jobsheets) => {
             collected: immediatePart + (hasAdvance ? 0 : balanceablePart),
             balance: null,
             jobTotal, hasAdvance, hideRow: false,
-            rowTotal: e.rowTotal, repairDate, deliveryDate,
+            rowTotal: e.rowTotal, repairDate, deliveryDate, createdAt,
             priorService, priorSpare, priorIncome, priorOthers, priorAdvance,
             priorServiceKey, priorSpareKey, priorIncomeKey, priorOthersKey, priorAdvanceKey,
             priorServiceDate: extractDateFromKey(priorServiceKey),
@@ -231,7 +247,7 @@ const buildRows = (jobsheets) => {
             advance: e.amount, collected: e.amount,
             balance: remainingBalance,
             jobTotal, hasAdvance: true, hideRow: false,
-            rowTotal: e.amount, repairDate, deliveryDate,
+            rowTotal: e.amount, repairDate, deliveryDate, createdAt,
             priorService, priorSpare, priorIncome, priorOthers, priorAdvance,
             priorServiceKey, priorSpareKey, priorIncomeKey, priorOthersKey, priorAdvanceKey,
             priorServiceDate: extractDateFromKey(priorServiceKey),
@@ -246,13 +262,37 @@ const buildRows = (jobsheets) => {
 
     return rows;
   };
+
+  // ✅ NEW — picks which date field on a row to filter by, based on dateFilterType.
+  // "delivery" rows without a real delivery date ("-") are treated as no-date
+  // (excluded from a delivery-date range filter, same as before delivery happens).
+  const getFilterDate = (row) => {
+    if (dateFilterType === "created")  return row.createdAt || "";
+    if (dateFilterType === "delivery") return (row.deliveryDate && row.deliveryDate !== "-") ? row.deliveryDate : "";
+    return row.repairDate || ""; // "received" (default)
+  };
+
   /* ================= FILTER ================= */
-  const getFilteredRows = () => {
+    const getFilteredRows = () => {
     const rows = buildRows(data);
-    const visible = rows.filter(r => !r.hideRow);
+    let visible = rows.filter(r => !r.hideRow);
+
+    // ✅ NEW — Job No / Name search (case-insensitive, partial match)
+    if (searchText.trim()) {
+      const q = searchText.trim().toLowerCase();
+      visible = visible.filter((row) =>
+        row.jobSheetNo?.toLowerCase().includes(q) ||
+        row.name?.toLowerCase().includes(q)
+      );
+    }
+
     if (!fromDate && !toDate) return visible;
+    // ✅ FIX — filter now uses the SELECTED date type (Received/Delivery/Created),
+    // not the transaction date. This is what was causing jobs to "disappear"
+    // when picking a date range — the row's txn date and the job's real
+    // received/delivery/created date weren't always the same day.
     return visible.filter((row) => {
-      const d = row.date;
+      const d = getFilterDate(row);
       if (!d) return false;
       if (fromDate && toDate) return d >= fromDate && d <= toDate;
       if (fromDate) return d >= fromDate;
@@ -284,6 +324,11 @@ const grandOthers    = allRows.reduce((s, r) => s + (r.others || 0),    0);
 const grandAdvance   = allRows.reduce((s, r) => s + r.advance,          0);
 const grandCollected = allRows.reduce((s, r) => s + (r.collected || 0), 0);
 const grandPending   = allRows.reduce((s, r) => s + (r.balance ?? 0),   0);
+
+  // ✅ NEW — human label for whichever date type is active, used in the UI + Excel filename
+  const dateTypeLabel = dateFilterType === "created" ? "Created Date"
+    : dateFilterType === "delivery" ? "Delivery Date"
+    : "Received Date";
 
   /* ================= EXCEL DOWNLOAD ================= */
   const handleExcelDownload = () => {
@@ -377,7 +422,7 @@ excelRows.push({
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Value Report");
 
-    const fileName = `ValueReport_${fromDate || "All"}_to_${toDate || "All"}.xlsx`;
+    const fileName = `ValueReport_${dateFilterType}_${fromDate || "All"}_to_${toDate || "All"}.xlsx`;
     XLSX.writeFile(wb, fileName);
   };
 
@@ -402,12 +447,37 @@ excelRows.push({
         </p>
       </div>
 
-      {/* ACTION BAR */}
-      <div className="print-hidden" style={{
+          <div className="print-hidden" style={{
         background: "#fff", borderRadius: 10, padding: "14px 18px",
         marginBottom: 20, display: "flex", flexWrap: "wrap", gap: 10,
         alignItems: "center", boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
       }}>
+        {/* ✅ NEW — Job No / Name search */}
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <label style={{ fontSize: 12, color: "#64748b", fontWeight: 600 }}>SEARCH</label>
+          <input
+            type="text"
+            placeholder="Job No / Name"
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            style={{ border: "1px solid #cbd5e1", borderRadius: 6, padding: "5px 10px", fontSize: 13, width: 180 }}
+          />
+        </div>
+
+        {/* ✅ NEW — Date Type selector: Received / Delivery / Created */}
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <label style={{ fontSize: 12, color: "#64748b", fontWeight: 600 }}>DATE TYPE</label>
+          <select
+            value={dateFilterType}
+            onChange={(e) => setDateFilterType(e.target.value)}
+            style={{ border: "1px solid #cbd5e1", borderRadius: 6, padding: "5px 8px", fontSize: 13, fontWeight: 600, color: "#1e293b" }}
+          >
+            <option value="received">Received Date</option>
+            <option value="delivery">Delivery Date</option>
+            <option value="created">Created Date</option>
+          </select>
+        </div>
+
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <label style={{ fontSize: 12, color: "#64748b", fontWeight: 600 }}>FROM</label>
           <input type="date"
@@ -491,6 +561,8 @@ excelRows.push({
             {allRows.filter(r => r.type === "advance").length} advance entries
           </span>
           <span style={{ fontSize: 12, color: "#94a3b8" }}>
+            {/* ✅ NEW — shows which date field is currently driving the filter */}
+            Filtered by <b style={{ color: "#334155" }}>{dateTypeLabel}</b>:{" "}
             {fromDate || toDate ? `${fromDate || "All"} → ${toDate || "All"}` : "All Dates"}
           </span>
         </div>

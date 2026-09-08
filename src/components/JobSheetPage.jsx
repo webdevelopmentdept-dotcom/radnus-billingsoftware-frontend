@@ -865,9 +865,8 @@ const handleAddCustomFault = async (i) => {
         : [...state, value]
     );
   };
-
-  /* ================= SERVICE ================= */
-  const today = new Date().toISOString().split("T")[0];
+/* ================= SERVICE ================= */
+const today = new Date().toLocaleDateString("en-CA");
   const [engineer, setEngineer] = useState("");
   const [engineerList, setEngineerList] = useState([]);
 
@@ -973,6 +972,7 @@ const handleAddCustomFault = async (i) => {
   // Holds the income value as it was when the job sheet was loaded/last saved,
   // used to detect whether the user genuinely changed Income this session.
   const initialIncomeRef = React.useRef(0);
+   const spareBaselineRef = React.useRef(0);
   const [repairDate, setRepairDate] = useState(today);
   const [deliveryDate, setDeliveryDate] = useState("");
   const [remarks, setRemarks] = useState("");
@@ -987,13 +987,17 @@ const handleAddCustomFault = async (i) => {
      after spare parts & other expenses are deducted from the total income. */
   useEffect(() => {
     const inc = Number(income || 0);
-    const sp = Number(spareCharge || 0);
+    const totalSpare = Number(spareCharge || 0);
+    const currentCycleSpare = Math.max(0, totalSpare - spareBaselineRef.current);
     const oth = Number(othersAmount || 0);
-    const remaining = inc - sp - oth;
+    const remaining = inc - currentCycleSpare - oth;
     setServiceCharge(remaining > 0 ? String(remaining) : "0");
   }, [income, spareCharge, othersAmount]);
 
-
+  useEffect(() => {
+    const total = (spareItems || []).reduce((s, it) => s + Number(it.amount || 0), 0);
+    setSpareCharge(String(total));
+  }, [spareItems]);
   /* ================= VISUAL ISSUES ================= */
   const addIssue = () => setVisualIssues([...visualIssues, ""]);
   const updateIssue = (i, val) => {
@@ -1085,7 +1089,7 @@ const handleAddCustomFault = async (i) => {
     //   1. If user manually picked a date in the Income Date field → use that, always.
     //   2. Else if Income amount actually changed this session → auto-stamp today.
     //   3. Else keep whatever incomeDate already existed (or today if none yet).
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = new Date().toLocaleDateString("en-CA");
     const incomeNum = Number(income || 0);
     const finalIncomeDate = incomeNum > 0
       ? (incomeDate || todayStr)
@@ -1175,7 +1179,7 @@ const handleAddCustomFault = async (i) => {
 
     // New job sheet: if user manually picked a date, use it; otherwise auto = today
     // (only when Income has a value).
-    const todayStr = new Date().toISOString().slice(0, 10);
+       const todayStr = new Date().toLocaleDateString("en-CA");
     const incomeNum = Number(income || 0);
     const finalIncomeDate = incomeNum > 0
       ? (incomeDate || todayStr)
@@ -1268,7 +1272,8 @@ const handleAddCustomFault = async (i) => {
     setSpareCharge("");
     setOthersAmount("");
     setOthersItems([]);
-    setSpareItems([]);
+       setSpareItems([]);
+    spareBaselineRef.current = 0;
     setIncome("");
     setIncomeDate("");
     setIncomeDateTouched(false); // reset manual-pick flag on New
@@ -1280,8 +1285,7 @@ const handleAddCustomFault = async (i) => {
     setTouched({});
     setFormErrors({});
 
-
-    const today = new Date().toISOString().split("T")[0];
+const today = new Date().toLocaleDateString("en-CA");
     setRepairDate(today);
     setDeliveryDate("");
 
@@ -1342,7 +1346,9 @@ const handleAddCustomFault = async (i) => {
     setDrawer(editData.service?.drawer || "");
     setServiceCharge(editData.service?.serviceCharge || "");
     setSpareCharge(editData.service?.spareCharge || "");
-    setSpareItems(editData.spareItems || []);
+       setSpareItems(editData.spareItems || []);
+    spareBaselineRef.current = (editData.spareItems || [])
+      .reduce((s, it) => s + Number(it.amount || 0), 0);
     setOthersAmount(editData.service?.othersAmount || "");
     setOthersItems(editData.service?.othersItems || []);
     setIncome(editData.service?.income || "");
@@ -2804,13 +2810,7 @@ const handleAddCustomFault = async (i) => {
             <Plus size={16} /> New
           </button>
 
-          {isEdit && localEditData && !localEditData?.isCancelled && (
-            <button style={{ ...sideBtnCancel, width: "auto" }} onClick={() => setShowCancelModal(true)}>
-              <Ban size={16} /> Cancel
-            </button>
-          )}
-
-          {isEdit && localEditData?.isInvoiced && (
+                 {isEdit && localEditData?.isInvoiced && (
             <button
               style={{ ...sideBtnRebill, width: "auto" }}
               disabled={rebilling}
@@ -2820,20 +2820,26 @@ const handleAddCustomFault = async (i) => {
                   `⚠️ Rebill Confirmation\n\nThis will:\n• Unlock the job sheet for editing\n• Clear current charges (Rebill #${rebillCount})\n• Set status back to "Received"\n• Save old invoice to rebill history\n\nProceed?`
                 );
                 if (!confirmed) return;
-                setRebilling(true);
+                              setRebilling(true);
                 try {
                   const user = JSON.parse(sessionStorage.getItem("user") || "{}");
                   const res = await axios.put(`${API}/api/jobsheets/${localEditData._id}/rebill`, {
                     rebilledBy: user?.username || "admin",
                   });
-                  setLocalEditData(res.data);
+                                 setLocalEditData(res.data);
                   setMobileStatus("Received");
                   setServiceCharge("");
-                  setSpareCharge("");
-                  setSpareItems([]);
+                  setSpareItems(res.data.spareItems || []);
+                  spareBaselineRef.current = (res.data.spareItems || [])
+                    .reduce((s, it) => s + Number(it.amount || 0), 0);
                   setRemarks("");
+                  setIncome("");
+                  setIncomeDate("");
+                  setIncomeDateTouched(false);
+                  setOthersAmount("");
+                  setOthersItems(res.data.service?.othersItems || []);
                   showToast(`Rebill #${rebillCount} opened! Add new charges and generate invoice.`, "success");
-                  fetchJobStats(); // rebill panna status "Received" aagum — stats refresh
+                  fetchJobStats();
                 } catch (err) {
                   console.error(err);
                   showToast("Rebill failed", "error");

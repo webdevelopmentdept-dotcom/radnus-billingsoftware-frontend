@@ -21,34 +21,40 @@ const IncomeReportPage = () => {
 
   useEffect(() => { fetchReport(); }, []);
 
-  /* ✅ Groups income by `incomeDate` — the date Income was actually entered/updated
-     and saved (see JobSheetPage.jsx). This is NOT repairDate, so a job created in
-     July but whose Income was entered in August will correctly show up in August. */
-  const processData = (jobsheets) => {
+  // ✅ AFTER — walk revenueEntries (one row per cycle/date) when present, so
+// every past rebill's income shows on ITS OWN date, same as ValueReport/AllReport.
+// Falls back to the old single income/incomeDate pair for jobs never rebilled.
+const processData = (jobsheets) => {
     const grouped = {};
     let gTotal = 0;
 
     jobsheets.forEach((item) => {
-      const amt = Number(item.service?.income || 0);
-      if (amt <= 0) return;
+      const entries = item.service?.revenueEntries || [];
 
-      // fallback to repairDate only if incomeDate was never set (old records before this fix)
-      const rawDate = item.service?.incomeDate || item.service?.repairDate;
-      if (!rawDate) return;
+      const pushRow = (date, amt) => {
+        if (!amt || amt <= 0 || !date) return;
+        const d = new Date(date).toISOString().slice(0, 10);
+        if (fromDate && d < fromDate) return;
+        if (toDate && d > toDate) return;
+        if (!grouped[d]) grouped[d] = [];
+        grouped[d].push({
+          jobSheetNo: item.jobSheetNo,
+          name: item.customer?.name || "",
+          engineer: item.service?.engineer || "-",
+          amount: amt,
+        });
+        gTotal += amt;
+      };
 
-      const date = new Date(rawDate).toISOString().slice(0, 10);
-
-      if (fromDate && date < fromDate) return;
-      if (toDate && date > toDate) return;
-
-      if (!grouped[date]) grouped[date] = [];
-      grouped[date].push({
-        jobSheetNo: item.jobSheetNo,
-        name: item.customer?.name || "",
-        engineer: item.service?.engineer || "-",
-        amount: amt,
-      });
-      gTotal += amt;
+      if (entries.length > 0) {
+        // ✅ one row per historical cycle — Aug's ₹1000 and Sep's ₹500 both show,
+        // each on its own date, instead of only the current top-level value.
+        entries.forEach((e) => pushRow(e.date, Number(e.income || 0)));
+      } else {
+        // job never rebilled — old single-value behaviour, unchanged
+        const rawDate = item.service?.incomeDate || item.service?.repairDate;
+        pushRow(rawDate, Number(item.service?.income || 0));
+      }
     });
 
     const sorted = {};
@@ -56,7 +62,6 @@ const IncomeReportPage = () => {
     setGroupedData(sorted);
     setGrandTotal(gTotal);
   };
-
   const handlePrint = () => window.print();
 
   const handleExcel = () => {

@@ -92,6 +92,88 @@ const AllReportPage = () => {
     return <span>{imei || "-"}</span>;
   };
 
+  /* ================= LIFETIME INCOME / SERVICE TOTAL (NEW) =================
+     🔴 BUG FIX — Once a job sheet has been rebilled at least once,
+     `service.income` / `service.serviceCharge` (top-level fields) only reflect
+     the CURRENT cycle (post-rebill), because the rebill route resets them to 0
+     and the user re-enters fresh charges. The OLD cycle's amount is preserved
+     only inside `service.revenueEntries[]` (one entry per cycle/date).
+
+     `service.spareCharge` does NOT have this problem — spareItems is cumulative
+     across every rebill, so spareCharge always already equals the full lifetime
+     total (see jobSheetController.js's rebill route comments).
+
+     This mirrors the exact same logic ValueReport.jsx's buildRows() already
+     uses: if revenueEntries has data, sum it (= true lifetime total); otherwise
+     (job never rebilled) fall back to the plain top-level field. */
+  const getIncomeTotal = (item) => {
+    const entries = item.service?.revenueEntries || [];
+    return entries.length > 0
+      ? entries.reduce((s, e) => s + Number(e.income || 0), 0)
+      : Number(item.service?.income || 0);
+  };
+
+  const getServiceTotal = (item) => {
+    const entries = item.service?.revenueEntries || [];
+    return entries.length > 0
+      ? entries.reduce((s, e) => s + Number(e.service || 0), 0)
+      : Number(item.service?.serviceCharge || 0);
+  };
+
+  /* ================= PER-DATE BREAKDOWN HELPERS (NEW) =================
+     Returns [{ label: "01 Aug", amount: 1000 }, ...] for a given field, only
+     when there's genuinely more than one date to show (single-cycle jobs
+     return an empty array so the pill list stays hidden — no visual noise). */
+  const getBreakdown = (entries, field) => {
+    const list = (entries || [])
+      .filter(e => Number(e[field] || 0) > 0)
+      .map(e => ({
+        label: new Date(e.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }),
+        amount: Number(e[field]),
+      }));
+    return list.length > 1 ? list : [];
+  };
+
+  const getIncomeBreakdown  = (item) => getBreakdown(item.service?.revenueEntries, "income");
+  const getServiceBreakdown = (item) => getBreakdown(item.service?.revenueEntries, "service");
+  // spareItems isn't a "revenueEntries" ledger — it's the raw spare parts list,
+  // each with its own date/amount — so it needs its own small mapper.
+  const getSpareBreakdown = (item) => {
+    const list = (item.spareItems || [])
+      .filter(si => Number(si.amount || 0) > 0)
+      .map(si => ({
+        label: new Date(si.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }),
+        amount: Number(si.amount),
+        name: si.name,
+      }));
+    return list.length > 1 ? list : [];
+  };
+
+  /* ================= BREAKDOWN PILL LIST (NEW) =================
+     Small, compact "date → amount" chips shown under a total when a job has
+     more than one transaction date (e.g. after a rebill). Kept visually light
+     (dashed divider, muted grey, small font) so it doesn't compete with the
+     main bold total above it. */
+  const BreakdownPills = ({ items, color }) => {
+    if (!items || items.length === 0) return null;
+    return (
+      <div style={{
+        marginTop: 5, paddingTop: 4, borderTop: "1px dashed #e2e8f0",
+        display: "flex", flexDirection: "column", gap: 2,
+      }}>
+        {items.map((it, i) => (
+          <div key={i} style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            gap: 10, fontSize: 10.5, lineHeight: 1.4,
+          }}>
+            <span style={{ color: "#94a3b8", fontWeight: 500 }}>{it.label}</span>
+            <span style={{ color, fontWeight: 700 }}>₹{it.amount.toLocaleString("en-IN")}</span>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   const handleExcelDownload = () => {
     if (filteredData.length === 0) { alert("No data to export ❌"); return; }
 
@@ -115,15 +197,19 @@ const AllReportPage = () => {
       "Dealer":             item.service?.dealer || "-",
       "Drawer":             item.service?.drawer || "-",
       // ===== NEW: Income / Service / Spare / Others / Advance breakdown =====
-      "Income ₹":           Number(item.service?.income || 0),
+      // ✅ FIX — Income ₹ / Service ₹ now use the LIFETIME total (sums
+      // revenueEntries when present) instead of the top-level field, which
+      // only holds the current post-rebill cycle. Spare ₹ was already correct
+      // (spareCharge/spareItems is cumulative by design).
+      "Income ₹":           getIncomeTotal(item),
       "Income Date":        item.service?.incomeDate ? new Date(item.service.incomeDate).toLocaleDateString("en-IN") : "-",
-      "Service ₹":          Number(item.service?.serviceCharge || 0),
+      "Service ₹":          getServiceTotal(item),
       "Spare ₹":            Number(item.service?.spareCharge || 0),
       "Others ₹":           Number(item.service?.othersAmount || 0),
       "Advance ₹":          Number(item.service?.advanceAmount || 0),
       "Advance Date":       item.service?.advanceDate ? new Date(item.service.advanceDate).toLocaleDateString("en-IN") : "-",
       // ===== END NEW =====
-      "Total":              (Number(item.service?.income || 0) + Number(item.service?.spareCharge || 0)),
+      "Total":              (getIncomeTotal(item) + Number(item.service?.spareCharge || 0)),
       "Payment Mode":       item.service?.paymentMode || "-",
       "Estimate":           item.service?.estimate || "-",
       "Repair Date":        item.service?.repairDate ? new Date(item.service.repairDate).toLocaleDateString("en-IN") : "-",
@@ -183,7 +269,9 @@ const AllReportPage = () => {
     return <span style={{ fontSize: 11 }}>{val}</span>;
   };
 
-const totalService = filteredData.reduce((s, i) => s + Number(i.service?.income || 0), 0);
+// ✅ FIX — totalService now sums the LIFETIME income (getIncomeTotal), not the
+// raw post-rebill top-level field, so the summary chip matches Value Report.
+const totalService = filteredData.reduce((s, i) => s + getIncomeTotal(i), 0);
 const totalSpare   = filteredData.reduce((s, i) => s + Number(i.service?.spareCharge || 0), 0);
 const totalAmount  = totalService + totalSpare;
 
@@ -325,7 +413,10 @@ const totalAmount  = totalService + totalSpare;
                 </td></tr>
               ) : filteredData.length > 0 ? (
                 filteredData.map((item, index) => {
-              const svc   = Number(item.service?.income || 0);
+              // ✅ FIX — svc now uses the LIFETIME income total (sums
+              // revenueEntries when present), same as Value Report's grand
+              // total. spare stays as-is: spareCharge is already cumulative.
+              const svc   = getIncomeTotal(item);
 const spare = Number(item.service?.spareCharge   || 0);
                   const rowBg = index % 2 === 0 ? "#fff" : "#f8fafc";
                   const td    = { padding: "8px 8px", borderBottom: "1px solid #e2e8f0", borderRight: "1px solid #e2e8f0", whiteSpace: "nowrap", color: "#1e293b" };
@@ -366,17 +457,21 @@ const spare = Number(item.service?.spareCharge   || 0);
                       <td style={td}>{item.service?.drawer || "-"}</td>
 
                       {/* ===== NEW: Income / Service / Spare / Others / Advance breakdown ===== */}
-                      <td style={{ ...td, color: "#0369a1", fontWeight: 600 }}>
+                      <td style={{ ...td, color: "#0369a1", fontWeight: 600, whiteSpace: "normal", verticalAlign: "top" }}>
                         {svc ? `₹${svc.toLocaleString("en-IN")}` : "-"}
+                        <BreakdownPills items={getIncomeBreakdown(item)} color="#0369a1" />
                       </td>
                       <td style={td}>
                         {item.service?.incomeDate ? new Date(item.service.incomeDate).toLocaleDateString("en-IN") : "-"}
                       </td>
-                      <td style={td}>
-                        {item.service?.serviceCharge ? `₹${Number(item.service.serviceCharge).toLocaleString("en-IN")}` : "-"}
+                      <td style={{ ...td, whiteSpace: "normal", verticalAlign: "top" }}>
+                        {/* ✅ FIX — lifetime service total, same as getIncomeTotal above */}
+                        {getServiceTotal(item) ? `₹${getServiceTotal(item).toLocaleString("en-IN")}` : "-"}
+                        <BreakdownPills items={getServiceBreakdown(item)} color="#1e293b" />
                       </td>
-                      <td style={td}>
+                      <td style={{ ...td, whiteSpace: "normal", verticalAlign: "top" }}>
                         {spare ? `₹${spare.toLocaleString("en-IN")}` : "-"}
+                        <BreakdownPills items={getSpareBreakdown(item)} color="#7e22ce" />
                       </td>
                       <td style={td}>
                         {item.service?.othersAmount ? `₹${Number(item.service.othersAmount).toLocaleString("en-IN")}` : "-"}

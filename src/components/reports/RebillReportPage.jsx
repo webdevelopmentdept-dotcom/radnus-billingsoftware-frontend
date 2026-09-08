@@ -75,50 +75,61 @@ const RebillReportPage = () => {
     return map[s] || { bg: "#F3F4F6", color: "#374151" };
   };
 
-  /* ── TOTALS ── */
-  const totalRebills   = filtered.reduce((sum, j) => sum + (j.rebillHistory?.length || 0), 0);
-  const totalRevenue   = filtered.reduce((sum, j) => {
-    const hist = j.rebillHistory?.reduce((s, r) => s + (r.serviceCharge || 0) + (r.spareCharge || 0), 0) || 0;
-    const curr = (j.service?.serviceCharge || 0) + (j.service?.spareCharge || 0);
-    return sum + hist + curr;
+  /* ================= TOTALS (FIX) =================
+     🔴 PREVIOUSLY: added serviceCharge + spareCharge together as "Total".
+     But Income ₹ already IS the full collected amount for a cycle — Service
+     Charge is auto-derived as (Income − Spare − Others), same rule
+     ValueReport.jsx uses. Adding Service + Spare on top of that double-counts
+     money that's already inside Income. Now every total below is Income-based,
+     which is the true "money collected" figure per cycle. */
+  const totalRebills = filtered.reduce((sum, j) => sum + (j.rebillHistory?.length || 0), 0);
+
+  const totalRevenue = filtered.reduce((sum, j) => {
+    const histIncome = j.rebillHistory?.reduce((s, r) => s + Number(r.income || 0), 0) || 0;
+    const currIncome = Number(j.service?.income || 0);
+    return sum + histIncome + currIncome;
   }, 0);
+
 const handleExcel = () => {
   const rows = [];
 
   filtered.forEach((job) => {
-    // each past rebill instance as a row
+    // each past ("before rebill") cycle as a row
     (job.rebillHistory || []).forEach((rb, ri) => {
       rows.push({
-        "Job No":        job.jobSheetNo,
-        "Customer":      job.customer?.name    || "-",
-        "Contact":       job.customer?.contact || "-",
-        "Device":        [job.device?.make, job.device?.model].filter(Boolean).join(" ") || "-",
-        "Engineer":      job.service?.engineer || "-",
-        "Repair No":     `Repair #${ri + 1}`,
-        "Service Charge": rb.serviceCharge || 0,
-        "Spare Charge":  rb.spareCharge   || 0,
-        "Total":         (rb.serviceCharge || 0) + (rb.spareCharge || 0),
-        "Remarks":       rb.remarks    || "-",
-        "Rebilled By":   rb.rebilledBy || "-",
-        "Rebilled At":   fmtDate(rb.rebilledAt),
+        "Job No":         job.jobSheetNo,
+        "Customer":       job.customer?.name    || "-",
+        "Contact":        job.customer?.contact || "-",
+        "Device":         [job.device?.make, job.device?.model].filter(Boolean).join(" ") || "-",
+        "Engineer":       job.service?.engineer || "-",
+        "Cycle":          `Before Rebill #${ri + 1}`,
+        "Income ₹":       rb.income        || 0,
+        "Service ₹":      rb.serviceCharge || 0,
+        "Spare ₹":        rb.spareCharge   || 0,
+        "Others ₹":       rb.othersAmount  || 0,
+        "Status at time": rb.status     || "-",
+        "Remarks":        rb.remarks    || "-",
+        "Rebilled By":    rb.rebilledBy || "-",
+        "Rebilled At":    fmtDate(rb.rebilledAt),
       });
     });
 
-    // current active repair as the last row
+    // current (active / after-rebill) cycle as the last row
     rows.push({
-      "Job No":        job.jobSheetNo,
-      "Customer":      job.customer?.name    || "-",
-      "Contact":       job.customer?.contact || "-",
-      "Device":        [job.device?.make, job.device?.model].filter(Boolean).join(" ") || "-",
-      "Engineer":      job.service?.engineer || "-",
-      "Repair No":     `Current Repair #${(job.rebillHistory?.length || 0) + 1}`,
-      "Service Charge": job.service?.serviceCharge || 0,
-      "Spare Charge":  job.service?.spareCharge   || 0,
-      "Total":         (job.service?.serviceCharge || 0) + (job.service?.spareCharge || 0),
-      "Remarks":       "-",
-      "Rebilled By":   "-",
-      "Rebilled At":   "-",
-      "Status":        job.device?.mobileStatus || "-",
+      "Job No":         job.jobSheetNo,
+      "Customer":       job.customer?.name    || "-",
+      "Contact":        job.customer?.contact || "-",
+      "Device":         [job.device?.make, job.device?.model].filter(Boolean).join(" ") || "-",
+      "Engineer":       job.service?.engineer || "-",
+      "Cycle":          `Current (After Rebill #${(job.rebillHistory?.length || 0)})`,
+      "Income ₹":       job.service?.income       || 0,
+      "Service ₹":      job.service?.serviceCharge || 0,
+      "Spare ₹":        job.service?.spareCharge   || 0,
+      "Others ₹":       job.service?.othersAmount  || 0,
+      "Status at time": job.device?.mobileStatus || "-",
+      "Remarks":        job.service?.remarks || "-",
+      "Rebilled By":    "-",
+      "Rebilled At":    "-",
     });
   });
 
@@ -146,7 +157,7 @@ const handleExcel = () => {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, flexWrap: "wrap", gap: 10 }}>
           <div>
             <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, color: "#0f172a" }}>🔄 Rebill Report</h1>
-            <p style={{ margin: "4px 0 0", fontSize: 13, color: "#64748b" }}>Jobs that were reopened and rebilled after invoice</p>
+            <p style={{ margin: "4px 0 0", fontSize: 13, color: "#64748b" }}>Jobs that were reopened and rebilled after invoice — Income/Service/Spare/Others shown before & after each rebill</p>
           </div>
   <div className="no-print" style={{ display: "flex", gap: 8 }}>
   <button onClick={() => navigate(-1)}
@@ -169,7 +180,7 @@ const handleExcel = () => {
           {[
             { label: "Total Rebilled Jobs",    value: filtered.length,       color: "#6366f1", bg: "#eef2ff", icon: "📋" },
             { label: "Total Rebill Instances", value: totalRebills,           color: "#f59e0b", bg: "#fffbeb", icon: "🔄" },
-            { label: "Total Revenue (All)",    value: fmtCurrency(totalRevenue), color: "#10b981", bg: "#f0fdf4", icon: "💰" },
+            { label: "Total Income (All)",     value: fmtCurrency(totalRevenue), color: "#10b981", bg: "#f0fdf4", icon: "💰" },
           ].map((c, i) => (
             <div key={i} style={{ background: c.bg, borderRadius: 12, padding: "16px 18px", border: `1.5px solid ${c.color}22` }}>
               <div style={{ fontSize: 20, marginBottom: 6 }}>{c.icon}</div>
@@ -211,7 +222,7 @@ const handleExcel = () => {
             <span style={{ fontSize: 13, fontWeight: 600, color: "#475569" }}>
               {filtered.length} job{filtered.length !== 1 ? "s" : ""} found
             </span>
-            <span style={{ fontSize: 12, color: "#94a3b8" }}>Click a row to see rebill history</span>
+            <span style={{ fontSize: 12, color: "#94a3b8" }}>Click a row to see rebill history (before/after amounts)</span>
           </div>
 
           {loading ? (
@@ -223,7 +234,7 @@ const handleExcel = () => {
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <thead>
                   <tr style={{ background: "#f1f5f9", color: "#475569" }}>
-                    {["#", "Job No", "Customer", "Contact", "Device", "Engineer", "Status", "Rebills", "Current Total", "All-time Total"].map((h, i) => (
+                    {["#", "Job No", "Customer", "Contact", "Device", "Engineer", "Status", "Rebills", "Current Income ₹", "Lifetime Income ₹"].map((h, i) => (
                       <th key={i} style={{ padding: "10px 12px", textAlign: "left", fontWeight: 600, borderBottom: "1px solid #e2e8f0", whiteSpace: "nowrap" }}>{h}</th>
                     ))}
                   </tr>
@@ -232,9 +243,11 @@ const handleExcel = () => {
                   {filtered.map((job, idx) => {
                     const ss        = statusStyle(job.device?.mobileStatus);
                     const rebills   = job.rebillHistory?.length || 0;
-                    const histTotal = job.rebillHistory?.reduce((s, r) => s + (r.serviceCharge || 0) + (r.spareCharge || 0), 0) || 0;
-                    const currTotal = (job.service?.serviceCharge || 0) + (job.service?.spareCharge || 0);
-                    const allTime   = histTotal + currTotal;
+                    // ✅ FIX — Income-based totals (avoids double-counting Service+Spare,
+                    // since Service Charge is already derived FROM Income).
+                    const histIncome = job.rebillHistory?.reduce((s, r) => s + Number(r.income || 0), 0) || 0;
+                    const currIncome = Number(job.service?.income || 0);
+                    const allTimeIncome = histIncome + currIncome;
                     const isExpanded = expandedId === job._id;
 
                     return (
@@ -261,16 +274,16 @@ const handleExcel = () => {
                               🔄 ×{rebills}
                             </span>
                           </td>
-                          <td style={{ padding: "10px 12px", fontWeight: 600, color: "#0f172a" }}>{fmtCurrency(currTotal)}</td>
-                          <td style={{ padding: "10px 12px", fontWeight: 700, color: "#6366f1" }}>{fmtCurrency(allTime)}</td>
+                          <td style={{ padding: "10px 12px", fontWeight: 600, color: "#0f172a" }}>{fmtCurrency(currIncome)}</td>
+                          <td style={{ padding: "10px 12px", fontWeight: 700, color: "#6366f1" }}>{fmtCurrency(allTimeIncome)}</td>
                         </tr>
 
-                        {/* EXPANDED — REBILL HISTORY */}
+                        {/* EXPANDED — REBILL HISTORY (Before → After, cycle by cycle) */}
                         {isExpanded && (
                           <tr>
                             <td colSpan={10} style={{ padding: "0 12px 12px 48px", background: "#f0f9ff" }}>
                               <div style={{ fontSize: 12, fontWeight: 700, color: "#1e40af", marginBottom: 8, marginTop: 8 }}>
-                                📋 Rebill history for {job.jobSheetNo}
+                                📋 Rebill history for {job.jobSheetNo} — each block shows Income / Service / Spare / Others for that cycle
                               </div>
                               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                                 {job.rebillHistory.map((rb, ri) => (
@@ -281,7 +294,10 @@ const handleExcel = () => {
                                   }}>
                                     <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center" }}>
                                       <span style={{ background: "#dbeafe", color: "#1d4ed8", fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 12 }}>
-                                        Repair #{ri + 1}
+                                        Before Rebill #{ri + 1}
+                                      </span>
+                                      <span style={{ color: "#0f172a", fontSize: 12, fontWeight: 700 }}>
+                                        Income: {fmtCurrency(rb.income)}
                                       </span>
                                       <span style={{ color: "#475569", fontSize: 12 }}>
                                         Service: <b style={{ color: "#0f172a" }}>{fmtCurrency(rb.serviceCharge)}</b>
@@ -289,9 +305,14 @@ const handleExcel = () => {
                                       <span style={{ color: "#475569", fontSize: 12 }}>
                                         Spare: <b style={{ color: "#0f172a" }}>{fmtCurrency(rb.spareCharge)}</b>
                                       </span>
-                                      <span style={{ color: "#6366f1", fontSize: 12, fontWeight: 700 }}>
-                                        Total: {fmtCurrency((rb.serviceCharge || 0) + (rb.spareCharge || 0))}
+                                      <span style={{ color: "#475569", fontSize: 12 }}>
+                                        Others: <b style={{ color: "#0f172a" }}>{fmtCurrency(rb.othersAmount)}</b>
                                       </span>
+                                      {rb.status && (
+                                        <span style={{ background: statusStyle(rb.status).bg, color: statusStyle(rb.status).color, fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 12 }}>
+                                          {rb.status}
+                                        </span>
+                                      )}
                                       {rb.remarks && (
                                         <span style={{ color: "#94a3b8", fontSize: 11, fontStyle: "italic" }}>
                                           "{rb.remarks}"
@@ -305,7 +326,7 @@ const handleExcel = () => {
                                   </div>
                                 ))}
 
-                                {/* Current (active) repair */}
+                                {/* Current (active, after the latest rebill) cycle */}
                                 <div style={{
                                   background: "#f0fdf4", border: "1px solid #86efac", borderRadius: 8,
                                   padding: "10px 14px", display: "flex", flexWrap: "wrap",
@@ -313,7 +334,10 @@ const handleExcel = () => {
                                 }}>
                                   <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center" }}>
                                     <span style={{ background: "#d1fae5", color: "#065f46", fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 12 }}>
-                                      Current Repair #{job.rebillHistory.length + 1}
+                                      Current (After Rebill #{job.rebillHistory.length})
+                                    </span>
+                                    <span style={{ color: "#0f172a", fontSize: 12, fontWeight: 700 }}>
+                                      Income: {fmtCurrency(job.service?.income)}
                                     </span>
                                     <span style={{ color: "#475569", fontSize: 12 }}>
                                       Service: <b style={{ color: "#0f172a" }}>{fmtCurrency(job.service?.serviceCharge)}</b>
@@ -321,8 +345,8 @@ const handleExcel = () => {
                                     <span style={{ color: "#475569", fontSize: 12 }}>
                                       Spare: <b style={{ color: "#0f172a" }}>{fmtCurrency(job.service?.spareCharge)}</b>
                                     </span>
-                                    <span style={{ color: "#10b981", fontSize: 12, fontWeight: 700 }}>
-                                      Total: {fmtCurrency((job.service?.serviceCharge || 0) + (job.service?.spareCharge || 0))}
+                                    <span style={{ color: "#475569", fontSize: 12 }}>
+                                      Others: <b style={{ color: "#0f172a" }}>{fmtCurrency(job.service?.othersAmount)}</b>
                                     </span>
                                     {job.device?.mobileStatus && (
                                       <span style={{ background: statusStyle(job.device.mobileStatus).bg, color: statusStyle(job.device.mobileStatus).color, fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 12 }}>
