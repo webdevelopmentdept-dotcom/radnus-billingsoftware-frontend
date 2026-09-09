@@ -37,7 +37,17 @@ const iconBtnStyle = {
   lineHeight: 1,
 };
 
-const SparePopup = ({ onClose, setSpareCharge, setSpareItems, existingItems = [] }) => {
+/* ✅ NEW — spareBaselineAmount prop: the CUMULATIVE spare total that existed
+   the exact moment the job was last rebilled (comes from JobSheetPage's
+   spareBaselineRef.current, which is itself loaded from service.spareBaseline
+   saved by the backend /rebill route). This popup walks the items array IN
+   ORDER and marks an item "before rebill" as long as the running sum-so-far
+   is still under this baseline. This is AMOUNT-based, not date-based — a
+   spare item's user-typed date has no guaranteed relationship to the exact
+   real-world moment rebill was clicked, so date comparison was unreliable
+   (see chat history). Amount-based split is exact because spareBaseline is
+   captured as a precise snapshot of cumulativeTotal at rebill time. */
+const SparePopup = ({ onClose, setSpareCharge, setSpareItems, existingItems = [], spareBaselineAmount = 0 }) => {
   const today = new Date().toISOString().split("T")[0];
   const API = import.meta.env.VITE_API_URL;
 
@@ -225,11 +235,32 @@ const SparePopup = ({ onClose, setSpareCharge, setSpareItems, existingItems = []
     setItems(updated);
   };
 
-  const total = items.reduce((sum, i) => sum + i.amount, 0);
+  // ✅ cumulative total (ALL items, all cycles) — this is what actually gets saved
+  // to service.spareCharge, same as before. Rebill Report subtracts spareBaseline
+  // from this to show the current-cycle-only figure elsewhere.
+  const cumulativeTotal = items.reduce((sum, i) => sum + i.amount, 0);
+
+  // ✅ AMOUNT-based split (not date-based). Walk items IN INSERTION ORDER —
+  // an item is "before rebill" as long as the running sum-so-far (before adding
+  // this item's amount) is still less than spareBaselineAmount. Since
+  // spareBaselineAmount is an exact snapshot of cumulativeTotal taken at the
+  // real moment of rebill, this always lands exactly on the boundary between
+  // pre-rebill and post-rebill items, regardless of what date got typed on
+  // each item.
+  let runningSum = 0;
+  const itemsWithCycle = items.map((item, idx) => {
+    const isOld = runningSum < spareBaselineAmount;
+    runningSum += item.amount;
+    return { item, idx, isOld };
+  });
+
+  const currentCycleItems = itemsWithCycle.filter(({ isOld }) => !isOld);
+  const total = currentCycleItems.reduce((sum, { item }) => sum + item.amount, 0);
+  const hasRebillSplit = spareBaselineAmount > 0;
 
   const handleSave = () => {
-    setSpareCharge(total);
-    setSpareItems(items);
+    setSpareCharge(cumulativeTotal);   // ✅ always save the full cumulative sum
+    setSpareItems(items);              // ✅ full array, unchanged — history preserved
     onClose();
   };
 
@@ -430,19 +461,26 @@ const SparePopup = ({ onClose, setSpareCharge, setSpareItems, existingItems = []
                 </tr>
               </thead>
               <tbody>
-                {items.length === 0 ? (
+                {itemsWithCycle.length === 0 ? (
                   <tr>
                     <td colSpan={6} style={{ ...td, textAlign: "center", color: "#9CA3AF", padding: "18px 6px" }}>
                       No spare items added yet
                     </td>
                   </tr>
-                ) : items.map((i, index) => (
-                  <tr key={index}>
-                    <td style={td}>{i.name}</td>
-                    <td style={td}>{i.qty}</td>
-                    <td style={td}>{i.rate}</td>
-                    <td style={{ ...td, fontWeight: 600 }}>{i.amount}</td>
-                    <td style={td}>{i.date ? String(i.date).slice(0, 10) : "-"}</td>
+                ) : itemsWithCycle.map(({ item: i, idx: index, isOld }) => (
+                  <tr key={index} style={isOld ? { background: "#F9FAFB" } : undefined}>
+                    <td style={{ ...td, color: isOld ? "#9CA3AF" : "#111827" }}>
+                      {i.name}
+                      {isOld && (
+                        <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: "#9CA3AF", background: "#F1F5F9", padding: "1px 6px", borderRadius: 10 }}>
+                          Before Rebill
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ ...td, color: isOld ? "#9CA3AF" : "#111827" }}>{i.qty}</td>
+                    <td style={{ ...td, color: isOld ? "#9CA3AF" : "#111827" }}>{i.rate}</td>
+                    <td style={{ ...td, fontWeight: 600, color: isOld ? "#9CA3AF" : "#111827" }}>{i.amount}</td>
+                    <td style={{ ...td, color: isOld ? "#9CA3AF" : "#111827" }}>{i.date ? String(i.date).slice(0, 10) : "-"}</td>
                     <td style={td}>
                       <button onClick={() => removeItem(index)} style={{ ...deleteBtn, display: "flex", alignItems: "center", justifyContent: "center" }} title="Remove">
                         <Trash2 size={12} />
@@ -455,8 +493,15 @@ const SparePopup = ({ onClose, setSpareCharge, setSpareItems, existingItems = []
           </div>
 
           {/* TOTAL */}
-          <div style={{ textAlign: "right", marginTop: 10, fontWeight: 700, fontSize: 15, color: "#111827" }}>
-            Total : <span style={{ color: GREEN }}>₹ {total}</span>
+          <div style={{ textAlign: "right", marginTop: 10 }}>
+            <div style={{ fontWeight: 700, fontSize: 15, color: "#111827" }}>
+              Total {hasRebillSplit ? "(this cycle)" : ""} : <span style={{ color: GREEN }}>₹ {total}</span>
+            </div>
+            {hasRebillSplit && cumulativeTotal !== total && (
+              <div style={{ fontSize: 11, color: "#6B7280", marginTop: 2 }}>
+                Lifetime total (all cycles): ₹ {cumulativeTotal}
+              </div>
+            )}
           </div>
 
         </div>

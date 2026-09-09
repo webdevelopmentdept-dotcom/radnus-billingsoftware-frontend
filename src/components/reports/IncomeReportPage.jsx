@@ -21,15 +21,20 @@ const IncomeReportPage = () => {
 
   useEffect(() => { fetchReport(); }, []);
 
-  // ✅ AFTER — walk revenueEntries (one row per cycle/date) when present, so
-// every past rebill's income shows on ITS OWN date, same as ValueReport/AllReport.
-// Falls back to the old single income/incomeDate pair for jobs never rebilled.
-const processData = (jobsheets) => {
+  // ✅ AFTER — walk revenueEntries (one row per in-cycle date) AND
+  // rebillHistory (one row per past invoiced cycle, sourced from the same
+  // accurate snapshot the Rebill Report already uses) so every past
+  // rebill's income shows on ITS OWN date, same as ValueReport/ServiceReport.
+  // Falls back to the old single income/incomeDate pair for jobs never
+  // rebilled and never updated.
+  const processData = (jobsheets) => {
     const grouped = {};
     let gTotal = 0;
 
     jobsheets.forEach((item) => {
       const entries = item.service?.revenueEntries || [];
+      const rebillHistoryArr = item.rebillHistory || [];
+      const repairDate = item.service?.repairDate?.slice(0, 10) || "";
 
       const pushRow = (date, amt) => {
         if (!amt || amt <= 0 || !date) return;
@@ -47,14 +52,26 @@ const processData = (jobsheets) => {
       };
 
       if (entries.length > 0) {
-        // ✅ one row per historical cycle — Aug's ₹1000 and Sep's ₹500 both show,
-        // each on its own date, instead of only the current top-level value.
+        // ✅ one row per in-cycle date entry — Aug's ₹1000 and Sep's ₹500
+        // both show, each on its own date, instead of only the current
+        // top-level value.
         entries.forEach((e) => pushRow(e.date, Number(e.income || 0)));
-      } else {
-        // job never rebilled — old single-value behaviour, unchanged
-        const rawDate = item.service?.incomeDate || item.service?.repairDate;
+      } else if (rebillHistoryArr.length === 0) {
+        // job never rebilled and never went through revenueEntries — old
+        // single-value behaviour, unchanged
+        const rawDate = item.service?.incomeDate || repairDate;
         pushRow(rawDate, Number(item.service?.income || 0));
       }
+
+      // ✅ NEW — every past rebill cycle's income, sourced directly from
+      // rebillHistory (the guaranteed-accurate snapshot the Rebill Report
+      // already reads from), dated by that cycle's own incomeDate — not
+      // "today" or a guessed fallback. This is what makes a rebilled job's
+      // pre-rebill income actually appear here instead of vanishing.
+      rebillHistoryArr.forEach((rb) => {
+        const d = rb.incomeDate || rb.rebilledAt || repairDate;
+        pushRow(d, Number(rb.income || 0));
+      });
     });
 
     const sorted = {};

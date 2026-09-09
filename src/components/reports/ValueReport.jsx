@@ -17,16 +17,17 @@ const ValueReport = () => {
      "delivery"    → service.deliveryDate
      "created"     → job.createdAt (job sheet creation date)
      "transaction" → row.date (the entry's OWN date — revenueEntries/spareItems/
-                     othersItems/advance date). ✅ NEW — this is the one to use
-                     for month-wise revenue reports that must include rebills:
-                     each transaction (Aug entry, Sep rebill entry, etc.) files
-                     under the month IT actually happened in, regardless of when
-                     the job sheet itself was created/received/delivered. The
-                     other three types are job-level (same date for every row of
-                     that job), so a rebilled job can vanish entirely from a
-                     month's report if that job's created/received/delivery date
-                     falls outside the range — "Transaction Date" never has that
-                     problem since it filters row-by-row. */
+                     othersItems/advance/rebillHistory date). ✅ this is the one
+                     to use for month-wise revenue reports that must include
+                     rebills: each transaction (Aug entry, Sep rebill entry,
+                     etc.) files under the month IT actually happened in,
+                     regardless of when the job sheet itself was
+                     created/received/delivered. The other three types are
+                     job-level (same date for every row of that job), so a
+                     rebilled job can vanish entirely from a month's report if
+                     that job's created/received/delivery date falls outside
+                     the range — "Transaction Date" never has that problem
+                     since it filters row-by-row. */
   const [dateFilterType, setDateFilterType] = useState("received"); // "received" | "delivery" | "created" | "transaction"
 
   const [data, setData] = useState([]);
@@ -161,6 +162,24 @@ const buildRows = (jobsheets) => {
       } else {
         addToBucket(repairDate, "others", Number(item.service?.othersAmount || 0));
       }
+
+      // ✅ NEW — every past rebill cycle's income/service/others, sourced
+      // directly from rebillHistory (the guaranteed-accurate snapshot the
+      // Rebill Report already reads from), dated by that cycle's own
+      // incomeDate — not "today" or a guessed fallback. This is what makes
+      // pre-rebill income/service (e.g. Sep-2's ₹650) actually show up here,
+      // instead of relying on the old fragile revenueEntries catch-up logic.
+      const rebillHistoryArr = item.rebillHistory || [];
+      rebillHistoryArr.forEach((rb) => {
+        const d = rb.incomeDate
+          ? new Date(rb.incomeDate).toISOString().slice(0, 10)
+          : rb.rebilledAt
+          ? new Date(rb.rebilledAt).toISOString().slice(0, 10)
+          : repairDate;
+        addToBucket(d, "service", Number(rb.serviceCharge || 0));
+        addToBucket(d, "income",  Number(rb.income || 0));
+        addToBucket(d, "others",  Number(rb.othersAmount || 0));
+      });
 
       const dateRows = Object.keys(dateBucket).map((d) => {
         const b = dateBucket[d];

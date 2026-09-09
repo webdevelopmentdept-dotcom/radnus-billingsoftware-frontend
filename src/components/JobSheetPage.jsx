@@ -1103,23 +1103,24 @@ const today = new Date().toLocaleDateString("en-CA");
       formData.append("accessories", JSON.stringify(accessories.filter(v => v !== "__custom")));
       formData.append("advanceItems", JSON.stringify(advanceItems));
       formData.append("visualIssues", JSON.stringify(visualIssues.filter(Boolean)));
-      formData.append("service", JSON.stringify({
-        engineer,
-        dealer, drawer, serviceRep,
-        serviceCharge: Number(serviceCharge || 0),
-        spareCharge: Number(spareCharge || 0),
-        income: incomeNum,
-        incomeDate: finalIncomeDate,
+    formData.append("service", JSON.stringify({
+  engineer,
+  dealer, drawer, serviceRep,
+  serviceCharge: Number(serviceCharge || 0),
+  spareCharge: Number(spareCharge || 0),
+  spareBaseline: spareBaselineRef.current,   // 👈 இந்த ஒரு line add பண்ணு
+  income: incomeNum,
+  incomeDate: finalIncomeDate,
 
-        othersAmount: Number(othersAmount || 0),
-        othersItems,
-        paymentMode, repairDate, deliveryDate,
-        instaFollowers, googleReview,
-        advanceAmount: Number(advanceAmount || 0),
-        advanceDate,
-        margin: Number(margin || 0),
-        remarks,
-      }));
+  othersAmount: Number(othersAmount || 0),
+  othersItems,
+  paymentMode, repairDate, deliveryDate,
+  instaFollowers, googleReview,
+  advanceAmount: Number(advanceAmount || 0),
+  advanceDate,
+  margin: Number(margin || 0),
+  remarks,
+}));
       formData.append("spareItems", JSON.stringify(spareItems));
       formData.append("idProofType", idProofType);
       if (idProofImage && typeof idProofImage !== "string") {
@@ -2357,19 +2358,23 @@ const today = new Date().toLocaleDateString("en-CA");
                         </Field>
                       </div>
 
-                      <div className="col-md-6">
-                        <Field label="Spare Charges ">
-                          <input
-                            type="text"
-                            className="form-control form-control-sm"
-                            placeholder="Tap to add "
-                            value={spareCharge}
-                            readOnly
-                            onClick={() => setSparePopup(true)}
-                            style={{ cursor: "pointer", background: "#f8f9fa" }}
-                          />
-                        </Field>
-                      </div>
+                    <div className="col-md-6">
+  <Field label="Spare Charges ">
+    <input
+      type="text"
+      className="form-control form-control-sm"
+      placeholder="Tap to add "
+      value={
+        Math.max(0, Number(spareCharge || 0) - spareBaselineRef.current) > 0
+          ? Math.max(0, Number(spareCharge || 0) - spareBaselineRef.current)
+          : ""
+      }
+      readOnly
+      onClick={() => setSparePopup(true)}
+      style={{ cursor: "pointer", background: "#f8f9fa" }}
+    />
+  </Field>
+</div>
 
                       <div className="col-md-6">
                         <Field label="Other Expenses">
@@ -2706,17 +2711,16 @@ const today = new Date().toLocaleDateString("en-CA");
               </div>
             </div>
           )}
-
-          {sparePopup && (
-            <SparePopup
-              onClose={() => setSparePopup(false)}
-              setSpareCharge={setSpareCharge}
-              setSpareItems={setSpareItems}
-              existingItems={spareItems}
-              referenceData={{ income, service: serviceCharge, others: othersAmount, advance: advanceAmount }}
-            />
-          )}
-
+{sparePopup && (
+  <SparePopup
+    onClose={() => setSparePopup(false)}
+    setSpareCharge={setSpareCharge}
+    setSpareItems={setSpareItems}
+    existingItems={spareItems}
+    referenceData={{ income, service: serviceCharge, others: othersAmount, advance: advanceAmount }}
+    spareBaselineAmount={spareBaselineRef.current}
+  />
+)}
           {showOthersPopup && (
             <OthersPopup
               onClose={() => setShowOthersPopup(false)}

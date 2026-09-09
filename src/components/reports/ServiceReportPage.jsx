@@ -45,6 +45,24 @@ const ServiceReportPage = () => {
         if (amt > 0) entries.push({ date: repairDate, amount: amt });
       }
 
+      // ✅ NEW — every past rebill cycle's service charge, sourced directly
+      // from rebillHistory (the guaranteed-accurate snapshot the Rebill
+      // Report already reads from), dated by that cycle's own incomeDate —
+      // not "today" or a guessed fallback. Without this, a rebilled job's
+      // pre-rebill service charge never showed up here at all.
+      const rebillHistoryArr = item.rebillHistory || [];
+      rebillHistoryArr.forEach((rb) => {
+        const amt = Number(rb.serviceCharge || 0);
+        if (amt > 0) {
+          const d = rb.incomeDate
+            ? new Date(rb.incomeDate).toISOString().slice(0, 10)
+            : rb.rebilledAt
+            ? new Date(rb.rebilledAt).toISOString().slice(0, 10)
+            : repairDate;
+          entries.push({ date: d, amount: amt });
+        }
+      });
+
       entries.forEach((e) => {
         if (fromDate && e.date < fromDate) return;
         if (toDate && e.date > toDate) return;
