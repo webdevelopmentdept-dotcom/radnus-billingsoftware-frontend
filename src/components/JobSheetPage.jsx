@@ -1345,12 +1345,15 @@ const today = new Date().toLocaleDateString("en-CA");
     setDealer(editData.service?.dealer || "");
     setDrawer(editData.service?.drawer || "");
     setServiceCharge(editData.service?.serviceCharge || "");
-       setSpareCharge(editData.service?.spareCharge || "");
+           setSpareCharge(editData.service?.spareCharge || "");
     setSpareItems(editData.spareItems || []);
-    // ✅ FIX — baseline = spare total BEFORE the current cycle only.
-    spareBaselineRef.current = editData.rebillPending
-      ? Number(editData.service?.spareBaseline || 0)
-      : 0;
+    // ✅ FIX — always trust the baseline stored in DB (set at rebill time).
+    // rebillPending only tracks whether "Save Rebill" was clicked yet —
+    // it does NOT mean the cycle has changed. Resetting baseline to 0 when
+    // rebillPending turns false was wiping out the correct baseline on
+    // every reopen after the first save, causing the full cumulative spare
+    // total to count as "current cycle" instead of just the new spares.
+    spareBaselineRef.current = Number(editData.service?.spareBaseline || 0);
     setOthersAmount(editData.service?.othersAmount || "");
     setOthersItems(editData.service?.othersItems || []);
     setIncome(editData.service?.income || "");
