@@ -124,7 +124,7 @@ const handleExcel = () => {
       "Cycle":          `Current (After Rebill #${(job.rebillHistory?.length || 0)})`,
       "Income ₹":       job.service?.income       || 0,
       "Service ₹":      job.service?.serviceCharge || 0,
-      "Spare ₹":        job.service?.spareCharge   || 0,
+      "Spare ₹":        Math.max(0, Number(job.service?.spareCharge || 0) - Number(job.service?.spareBaseline || 0)),
       "Others ₹":       job.service?.othersAmount  || 0,
       "Status at time": job.device?.mobileStatus || "-",
       "Remarks":        job.service?.remarks || "-",
@@ -248,7 +248,12 @@ const handleExcel = () => {
                     const histIncome = job.rebillHistory?.reduce((s, r) => s + Number(r.income || 0), 0) || 0;
                     const currIncome = Number(job.service?.income || 0);
                     const allTimeIncome = histIncome + currIncome;
-                    const isExpanded = expandedId === job._id;
+                                      const isExpanded = expandedId === job._id;
+                    // ✅ NEW — spareCharge is cumulative; subtract baseline for this cycle's own spare.
+                    const currentCycleSpare = Math.max(
+                      0,
+                      Number(job.service?.spareCharge || 0) - Number(job.service?.spareBaseline || 0)
+                    );
 
                     return (
                       <React.Fragment key={job._id}>
@@ -296,6 +301,10 @@ const handleExcel = () => {
                                       <span style={{ background: "#dbeafe", color: "#1d4ed8", fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 12 }}>
                                         Before Rebill #{ri + 1}
                                       </span>
+                                      {/* ✅ NEW — date shown right next to the cycle badge */}
+                                      <span style={{ color: "#94a3b8", fontSize: 11, fontWeight: 600 }}>
+                                        {fmtDate(rb.rebilledAt)}
+                                      </span>
                                       <span style={{ color: "#0f172a", fontSize: 12, fontWeight: 700 }}>
                                         Income: {fmtCurrency(rb.income)}
                                       </span>
@@ -320,7 +329,7 @@ const handleExcel = () => {
                                       )}
                                     </div>
                                     <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-                                      <span style={{ fontSize: 11, color: "#94a3b8" }}>{fmtDate(rb.rebilledAt)}</span>
+                                      {/* date moved next to the badge above; only "by" stays here */}
                                       <span style={{ fontSize: 11, color: "#64748b" }}>by <b>{rb.rebilledBy}</b></span>
                                     </div>
                                   </div>
@@ -343,7 +352,7 @@ const handleExcel = () => {
                                       Service: <b style={{ color: "#0f172a" }}>{fmtCurrency(job.service?.serviceCharge)}</b>
                                     </span>
                                     <span style={{ color: "#475569", fontSize: 12 }}>
-                                      Spare: <b style={{ color: "#0f172a" }}>{fmtCurrency(job.service?.spareCharge)}</b>
+                                      Spare: <b style={{ color: "#0f172a" }}>{fmtCurrency(currentCycleSpare)}</b>
                                     </span>
                                     <span style={{ color: "#475569", fontSize: 12 }}>
                                       Others: <b style={{ color: "#0f172a" }}>{fmtCurrency(job.service?.othersAmount)}</b>

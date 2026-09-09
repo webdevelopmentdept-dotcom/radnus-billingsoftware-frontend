@@ -310,10 +310,10 @@ const buildRows = (jobsheets) => {
   };
 
   /* ================= GROUP BY DATE ================= */
-  const groupByDate = (rows) => {
+   const groupByDate = (rows) => {
     const grouped = {};
     rows.forEach((row) => {
-      const d = row.date || "Unknown";
+      const d = getFilterDate(row) || row.date || "Unknown";
       if (!grouped[d]) grouped[d] = [];
       grouped[d].push(row);
     });

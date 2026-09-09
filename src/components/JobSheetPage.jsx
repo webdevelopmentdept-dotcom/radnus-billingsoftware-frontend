@@ -1345,10 +1345,12 @@ const today = new Date().toLocaleDateString("en-CA");
     setDealer(editData.service?.dealer || "");
     setDrawer(editData.service?.drawer || "");
     setServiceCharge(editData.service?.serviceCharge || "");
-    setSpareCharge(editData.service?.spareCharge || "");
-       setSpareItems(editData.spareItems || []);
-    spareBaselineRef.current = (editData.spareItems || [])
-      .reduce((s, it) => s + Number(it.amount || 0), 0);
+       setSpareCharge(editData.service?.spareCharge || "");
+    setSpareItems(editData.spareItems || []);
+    // ✅ FIX — baseline = spare total BEFORE the current cycle only.
+    spareBaselineRef.current = editData.rebillPending
+      ? Number(editData.service?.spareBaseline || 0)
+      : 0;
     setOthersAmount(editData.service?.othersAmount || "");
     setOthersItems(editData.service?.othersItems || []);
     setIncome(editData.service?.income || "");
