@@ -21,19 +21,55 @@ const IncomeReportPage = () => {
 
   useEffect(() => { fetchReport(); }, []);
 
-  // ✅ AFTER — walk revenueEntries (one row per in-cycle date) AND
-  // rebillHistory (one row per past invoiced cycle, sourced from the same
-  // accurate snapshot the Rebill Report already uses) so every past
-  // rebill's income shows on ITS OWN date, same as ValueReport/ServiceReport.
-  // Falls back to the old single income/incomeDate pair for jobs never
-  // rebilled and never updated.
+  /* ================= REBILL HISTORY DEDUP (FIX) =================
+     Same fix as ValueReport.jsx — only fall back to a rebillHistory snapshot
+     for a cycle when revenueEntries has NO entry inside that cycle's date
+     window. Most jobs already have their pre-rebill income tracked date-wise
+     in revenueEntries (via the normal Update flow); adding rebillHistory
+     unconditionally on top of that double-counted them. */
+  const getUncoveredRebillEntries = (item) => {
+    const entries = item.service?.revenueEntries || [];
+    const rebillHistoryArr = item.rebillHistory || [];
+    if (rebillHistoryArr.length === 0) return [];
+
+    const sorted = [...rebillHistoryArr].sort(
+      (a, b) => new Date(a.rebilledAt || 0) - new Date(b.rebilledAt || 0)
+    );
+
+    const uncovered = [];
+    let cycleStart = null;
+
+    sorted.forEach((rb) => {
+      const cycleEnd = rb.rebilledAt ? new Date(rb.rebilledAt) : null;
+
+      const hasTrackedEntry = entries.some((e) => {
+        if (!e.date) return false;
+        const d = new Date(e.date);
+        if (cycleStart && d < cycleStart) return false;
+        if (cycleEnd && d > cycleEnd) return false;
+        return Number(e.income || 0) > 0 || Number(e.service || 0) > 0;
+      });
+
+      if (!hasTrackedEntry) uncovered.push(rb);
+
+      cycleStart = cycleEnd;
+    });
+
+    return uncovered;
+  };
+
+  // ✅ AFTER — walk revenueEntries (one row per in-cycle date) AND the
+  // uncovered rebillHistory cycles (one row per past invoiced cycle that
+  // revenueEntries never tracked) so every past rebill's income shows on ITS
+  // OWN date, same as ValueReport/ServiceReport — without double-counting
+  // cycles revenueEntries already has.
   const processData = (jobsheets) => {
     const grouped = {};
     let gTotal = 0;
 
     jobsheets.forEach((item) => {
       const entries = item.service?.revenueEntries || [];
-      const rebillHistoryArr = item.rebillHistory || [];
+      const uncoveredRebills = getUncoveredRebillEntries(item);
       const repairDate = item.service?.repairDate?.slice(0, 10) || "";
 
       const pushRow = (date, amt) => {
@@ -56,19 +92,17 @@ const IncomeReportPage = () => {
         // both show, each on its own date, instead of only the current
         // top-level value.
         entries.forEach((e) => pushRow(e.date, Number(e.income || 0)));
-      } else if (rebillHistoryArr.length === 0) {
+      } else if ((item.rebillHistory || []).length === 0) {
         // job never rebilled and never went through revenueEntries — old
         // single-value behaviour, unchanged
         const rawDate = item.service?.incomeDate || repairDate;
         pushRow(rawDate, Number(item.service?.income || 0));
       }
 
-      // ✅ NEW — every past rebill cycle's income, sourced directly from
-      // rebillHistory (the guaranteed-accurate snapshot the Rebill Report
-      // already reads from), dated by that cycle's own incomeDate — not
-      // "today" or a guessed fallback. This is what makes a rebilled job's
-      // pre-rebill income actually appear here instead of vanishing.
-      rebillHistoryArr.forEach((rb) => {
+      // ✅ NEW — only the rebill cycles revenueEntries genuinely never
+      // tracked, sourced from rebillHistory, dated by that cycle's own
+      // incomeDate — not "today" or a guessed fallback.
+      uncoveredRebills.forEach((rb) => {
         const d = rb.incomeDate || rb.rebilledAt || repairDate;
         pushRow(d, Number(rb.income || 0));
       });

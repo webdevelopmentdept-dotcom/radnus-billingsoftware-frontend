@@ -143,7 +143,7 @@ const ReportPage = () => {
   { label: "Dealer Report",   path: "/dealer-report" },
   { label: "Rebill Report",   path: "/rebill-report" },
   { label: "Income Report",   path: "/income-report" },
-  { label: "Service Report",  path: "/service-report" },
+  { label: "Service Report (Margin)",  path: "/service-report" },
   { label: "Others Report",   path: "/others-report" },
   { label: "Advance Report",  path: "/advance-report" },
 ].map((b, i) => (

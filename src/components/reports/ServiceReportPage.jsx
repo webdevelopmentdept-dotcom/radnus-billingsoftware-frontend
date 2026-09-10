@@ -21,6 +21,43 @@ const ServiceReportPage = () => {
 
   useEffect(() => { fetchReport(); }, []);
 
+  /* ================= REBILL HISTORY DEDUP (FIX) =================
+     Same fix as ValueReport.jsx — only fall back to a rebillHistory snapshot
+     for a cycle when revenueEntries has NO entry inside that cycle's date
+     window. Most jobs already have their pre-rebill service charge tracked
+     date-wise in revenueEntries (via the normal Update flow); adding
+     rebillHistory unconditionally on top of that double-counted them. */
+  const getUncoveredRebillEntries = (item) => {
+    const entries = item.service?.revenueEntries || [];
+    const rebillHistoryArr = item.rebillHistory || [];
+    if (rebillHistoryArr.length === 0) return [];
+
+    const sorted = [...rebillHistoryArr].sort(
+      (a, b) => new Date(a.rebilledAt || 0) - new Date(b.rebilledAt || 0)
+    );
+
+    const uncovered = [];
+    let cycleStart = null;
+
+    sorted.forEach((rb) => {
+      const cycleEnd = rb.rebilledAt ? new Date(rb.rebilledAt) : null;
+
+      const hasTrackedEntry = entries.some((e) => {
+        if (!e.date) return false;
+        const d = new Date(e.date);
+        if (cycleStart && d < cycleStart) return false;
+        if (cycleEnd && d > cycleEnd) return false;
+        return Number(e.income || 0) > 0 || Number(e.service || 0) > 0;
+      });
+
+      if (!hasTrackedEntry) uncovered.push(rb);
+
+      cycleStart = cycleEnd;
+    });
+
+    return uncovered;
+  };
+
   const processData = (jobsheets) => {
     const grouped = {};
     let gTotal = 0;
@@ -45,13 +82,9 @@ const ServiceReportPage = () => {
         if (amt > 0) entries.push({ date: repairDate, amount: amt });
       }
 
-      // ✅ NEW — every past rebill cycle's service charge, sourced directly
-      // from rebillHistory (the guaranteed-accurate snapshot the Rebill
-      // Report already reads from), dated by that cycle's own incomeDate —
-      // not "today" or a guessed fallback. Without this, a rebilled job's
-      // pre-rebill service charge never showed up here at all.
-      const rebillHistoryArr = item.rebillHistory || [];
-      rebillHistoryArr.forEach((rb) => {
+      // ✅ FIX — only fill in a rebillHistory service charge when that cycle
+      // isn't already covered by revenueEntries (see getUncoveredRebillEntries).
+      getUncoveredRebillEntries(item).forEach((rb) => {
         const amt = Number(rb.serviceCharge || 0);
         if (amt > 0) {
           const d = rb.incomeDate
@@ -96,7 +129,7 @@ const ServiceReportPage = () => {
   return (
     <div className="min-h-screen bg-gray-100 p-6">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold">🔧 Service Value Report</h1>
+        <h1 className="text-2xl font-bold">🔧 Service Value Report (Margin)</h1>
         <p className="text-sm text-gray-500">Date-wise service charges</p>
       </div>
 

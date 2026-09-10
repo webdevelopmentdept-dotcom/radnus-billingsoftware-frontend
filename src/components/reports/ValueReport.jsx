@@ -107,7 +107,55 @@ useEffect(() => {
     fetchReport();
   };
 
+  /* ================= REBILL HISTORY DEDUP (FIX) =================
+     🔴 BUG: adding every rebillHistory snapshot unconditionally double-counted
+     jobs where the pre-rebill cycle's income/service was ALREADY captured
+     date-wise inside revenueEntries (this happens whenever the job went
+     through a normal Update before being invoiced — the backend's
+     updateJobSheet controller pushes a dated revenueEntries row on every
+     income/service change, across every cycle, rebill or not). In that case
+     revenueEntries already equals the true lifetime total (this is what All
+     Report's getIncomeTotal/getServiceTotal already relies on) — adding
+     rebillHistory on top summed the same rupee twice.
+     rebillHistory is only a genuinely MISSING record when a job was invoiced
+     WITHOUT ever going through a normal Update first, so revenueEntries has
+     no entry at all for that cycle's window — only then do we fall back to
+     the rebillHistory snapshot.
+     For each rebill cycle (sorted oldest→newest, bounded by the previous
+     cycle's rebilledAt and this cycle's own rebilledAt), check whether
+     revenueEntries has ANY entry with income/service > 0 inside that window.
+     If yes → already tracked, skip. If no → genuinely missing, use the
+     snapshot. */
+  const getUncoveredRebillEntries = (item) => {
+    const entries = item.service?.revenueEntries || [];
+    const rebillHistoryArr = item.rebillHistory || [];
+    if (rebillHistoryArr.length === 0) return [];
 
+    const sorted = [...rebillHistoryArr].sort(
+      (a, b) => new Date(a.rebilledAt || 0) - new Date(b.rebilledAt || 0)
+    );
+
+    const uncovered = [];
+    let cycleStart = null; // no lower bound for the very first cycle
+
+    sorted.forEach((rb) => {
+      const cycleEnd = rb.rebilledAt ? new Date(rb.rebilledAt) : null;
+
+      const hasTrackedEntry = entries.some((e) => {
+        if (!e.date) return false;
+        const d = new Date(e.date);
+        if (cycleStart && d < cycleStart) return false;
+        if (cycleEnd && d > cycleEnd) return false;
+        return Number(e.income || 0) > 0 || Number(e.service || 0) > 0;
+      });
+
+      if (!hasTrackedEntry) uncovered.push(rb);
+
+      cycleStart = cycleEnd;
+    });
+
+    return uncovered;
+  };
 
 
 const buildRows = (jobsheets) => {
@@ -163,14 +211,13 @@ const buildRows = (jobsheets) => {
         addToBucket(repairDate, "others", Number(item.service?.othersAmount || 0));
       }
 
-      // ✅ NEW — every past rebill cycle's income/service/others, sourced
-      // directly from rebillHistory (the guaranteed-accurate snapshot the
-      // Rebill Report already reads from), dated by that cycle's own
-      // incomeDate — not "today" or a guessed fallback. This is what makes
-      // pre-rebill income/service (e.g. Sep-2's ₹650) actually show up here,
-      // instead of relying on the old fragile revenueEntries catch-up logic.
-      const rebillHistoryArr = item.rebillHistory || [];
-      rebillHistoryArr.forEach((rb) => {
+      // ✅ FIX — only ADD a rebillHistory snapshot when that cycle's
+      // income/service isn't already present in revenueEntries (see
+      // getUncoveredRebillEntries above). This is what stops jobs like
+      // JS-736 — whose pre-rebill cycle was already tracked date-wise via
+      // normal Updates — from being double-counted, while still filling the
+      // genuine gap for jobs invoiced without ever going through an Update.
+      getUncoveredRebillEntries(item).forEach((rb) => {
         const d = rb.incomeDate
           ? new Date(rb.incomeDate).toISOString().slice(0, 10)
           : rb.rebilledAt
