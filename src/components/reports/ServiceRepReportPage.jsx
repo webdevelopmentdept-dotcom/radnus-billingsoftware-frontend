@@ -12,6 +12,138 @@ const API = import.meta.env.VITE_API_URL;
 
 const fmt = (n) => n ? "₹" + Number(n).toLocaleString("en-IN") : "₹0";
 
+/* ================= LIFETIME TOTAL HELPERS (FIX) =================
+   🔴 BUG — Service ₹ / Income ₹ columns were reading the raw top-level
+   `service.serviceCharge` / `service.income` fields. Those fields get RESET
+   TO 0 every time a job is rebilled (see backend's /rebill route), and the
+   user re-enters fresh charges for the new cycle only. So once a job had
+   been rebilled even once, this report only ever showed the CURRENT
+   cycle's amount — the pre-rebill amount silently vanished from every
+   total, subtotal, and grand total on this page.
+
+   ✅ FIX — same lifetime-total + dedup approach already used in
+   ValueReport.jsx / ServiceReportPage.jsx / IncomeReportPage.jsx:
+   - revenueEntries (pushed by the backend's updateJobSheet controller on
+     every Income/Service change, across every cycle) is the primary,
+     date-wise ledger — sum it when present.
+   - rebillHistory is only used as a FALLBACK for cycles revenueEntries
+     never tracked (e.g. a job invoiced without ever going through a normal
+     Update first) — added via getUncoveredRebillEntries's cycle-window
+     dedup check, so a cycle already covered by revenueEntries is never
+     double-counted.
+   Spare ₹ is NOT touched — spareCharge is already cumulative by design
+   (spareItems array persists across every rebill). Advance ₹ is also not
+   reset by rebill, so it's already lifetime-accurate as-is.
+   Others ₹ now sums othersItems (the per-expense list) when present, same
+   idea as Spare — othersItems isn't cleared by rebill either, only the
+   top-level othersAmount summary field is. */
+
+const getUncoveredRebillEntries = (job) => {
+  const entries = job.service?.revenueEntries || [];
+  const rebillHistoryArr = job.rebillHistory || [];
+  if (rebillHistoryArr.length === 0) return [];
+
+  const sorted = [...rebillHistoryArr].sort(
+    (a, b) => new Date(a.rebilledAt || 0) - new Date(b.rebilledAt || 0)
+  );
+
+  const uncovered = [];
+  let cycleStart = null; // no lower bound for the very first cycle
+
+  sorted.forEach((rb) => {
+    const cycleEnd = rb.rebilledAt ? new Date(rb.rebilledAt) : null;
+
+    const hasTrackedEntry = entries.some((e) => {
+      if (!e.date) return false;
+      const d = new Date(e.date);
+      if (cycleStart && d < cycleStart) return false;
+      if (cycleEnd && d > cycleEnd) return false;
+      return Number(e.income || 0) > 0 || Number(e.service || 0) > 0;
+    });
+
+    if (!hasTrackedEntry) uncovered.push(rb);
+    cycleStart = cycleEnd;
+  });
+
+  return uncovered;
+};
+
+const getServiceTotal = (job) => {
+  const entries = job.service?.revenueEntries || [];
+  const fromEntries = entries.reduce((s, e) => s + Number(e.service || 0), 0);
+  const fromRebills = getUncoveredRebillEntries(job).reduce((s, rb) => s + Number(rb.serviceCharge || 0), 0);
+  return entries.length > 0
+    ? fromEntries + fromRebills
+    : Number(job.service?.serviceCharge || 0) + fromRebills;
+};
+
+const getIncomeTotal = (job) => {
+  const entries = job.service?.revenueEntries || [];
+  const fromEntries = entries.reduce((s, e) => s + Number(e.income || 0), 0);
+  const fromRebills = getUncoveredRebillEntries(job).reduce((s, rb) => s + Number(rb.income || 0), 0);
+  return entries.length > 0
+    ? fromEntries + fromRebills
+    : Number(job.service?.income || 0) + fromRebills;
+};
+
+const getOthersTotal = (job) => {
+  const items = job.service?.othersItems || [];
+  if (items.length > 0) return items.reduce((s, oi) => s + Number(oi.amount || 0), 0);
+  return Number(job.service?.othersAmount || 0);
+};
+
+/* ================= PER-DATE BREAKDOWN (rebill detail, NEW) =================
+   Returns [{ label: "02 Sep", amount: 1200 }, ...] combining revenueEntries
+   dates with any uncovered rebillHistory cycle's date, for a given field
+   ("service" | "income"). Only returned when there's genuinely more than
+   one date to show (single-cycle jobs stay pill-free — no visual noise),
+   so a rebilled job's "already billed vs new cycle" split becomes visible
+   right under its amount. */
+const getBreakdown = (job, field) => {
+  const entries = job.service?.revenueEntries || [];
+  const list = entries
+    .filter((e) => Number(e[field] || 0) > 0)
+    .map((e) => ({
+      label: new Date(e.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }),
+      amount: Number(e[field]),
+    }));
+
+  const rebillField = field === "service" ? "serviceCharge" : "income";
+  getUncoveredRebillEntries(job).forEach((rb) => {
+    const amt = Number(rb[rebillField] || 0);
+    if (amt <= 0) return;
+    const d = rb.incomeDate || rb.rebilledAt;
+    list.push({
+      label: d
+        ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })
+        : "Rebilled",
+      amount: amt,
+    });
+  });
+
+  return list.length > 1 ? list : [];
+};
+
+const BreakdownPills = ({ items, color }) => {
+  if (!items || items.length === 0) return null;
+  return (
+    <div style={{
+      marginTop: 4, paddingTop: 3, borderTop: "1px dashed #e2e8f0",
+      display: "flex", flexDirection: "column", gap: 1,
+    }}>
+      {items.map((it, i) => (
+        <div key={i} style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          gap: 8, fontSize: 10, lineHeight: 1.35,
+        }}>
+          <span style={{ color: "#94a3b8", fontWeight: 500 }}>{it.label}</span>
+          <span style={{ color, fontWeight: 700 }}>₹{it.amount.toLocaleString("en-IN")}</span>
+        </div>
+      ))}
+    </div>
+  );
+};
+
 const statusColors = {
   Received:          { bg: "#E1F5EE", color: "#0F6E56" },
   Pending:           { bg: "#FAEEDA", color: "#854F0B" },
@@ -73,11 +205,15 @@ const JOB_HEADERS = [
 ];
 
 const JobRow = ({ job, i, rep }) => {
-  const sc  = Number(job.service?.serviceCharge || 0);
-  const sp  = Number(job.service?.spareCharge   || 0);
-  const inc = Number(job.service?.income        || 0);
-  const oth = Number(job.service?.othersAmount  || 0);
-  const adv = Number(job.service?.advanceAmount || 0);
+  // ✅ FIX — Service ₹ / Income ₹ / Others ₹ now use the lifetime totals
+  // (rebill-safe), not the raw top-level fields that reset to 0 on rebill.
+  const sc  = getServiceTotal(job);
+  const sp  = Number(job.service?.spareCharge   || 0);   // already cumulative
+  const inc = getIncomeTotal(job);
+  const oth = getOthersTotal(job);
+  const adv = Number(job.service?.advanceAmount || 0);   // not touched by rebill
+  const serviceBreakdown = getBreakdown(job, "service");
+  const incomeBreakdown  = getBreakdown(job, "income");
   return (
     <tr style={{ borderBottom: "1px solid #f0f0f0" }}
       onMouseEnter={e => e.currentTarget.style.background = "#f8f9fa"}
@@ -102,7 +238,10 @@ const JobRow = ({ job, i, rep }) => {
       <td style={{ padding: "8px 10px" }}>
         <StatusBadge status={job.device?.mobileStatus} />
       </td>
-      <td style={{ padding: "8px 10px", color: "#7c3aed", fontWeight: 500 }}>{sc ? fmt(sc) : "—"}</td>
+      <td style={{ padding: "8px 10px", color: "#7c3aed", fontWeight: 500, whiteSpace: "normal", verticalAlign: "top" }}>
+        {sc ? fmt(sc) : "—"}
+        <BreakdownPills items={serviceBreakdown} color="#7c3aed" />
+      </td>
       <td style={{ padding: "8px 10px", color: "#db2777", fontWeight: 500 }}>{sp ? fmt(sp) : "—"}</td>
       <td style={{ padding: "8px 10px", color: "#c2410c", fontWeight: 500 }}>{oth ? fmt(oth) : "—"}</td>
       <td style={{ padding: "8px 10px", color: "#0d6efd", fontWeight: 500 }}>{adv ? fmt(adv) : "—"}</td>
@@ -116,7 +255,10 @@ const JobRow = ({ job, i, rep }) => {
             : "—";
         })()}
       </td>
-      <td style={{ padding: "8px 10px", color: "#0e7490", fontWeight: 500 }}>{inc ? fmt(inc) : "—"}</td>
+      <td style={{ padding: "8px 10px", color: "#0e7490", fontWeight: 500, whiteSpace: "normal", verticalAlign: "top" }}>
+        {inc ? fmt(inc) : "—"}
+        <BreakdownPills items={incomeBreakdown} color="#0e7490" />
+      </td>
       <td style={{ padding: "8px 10px", textAlign: "center" }}><SocialText val={job.service?.instaFollowers} /></td>
       <td style={{ padding: "8px 10px", textAlign: "center" }}><SocialText val={job.service?.googleReview} /></td>
       <td style={{ padding: "8px 10px", color: "#6c757d", whiteSpace: "nowrap" }}>
@@ -223,10 +365,11 @@ const ServiceRepReportPage = () => {
   const totalJobs    = allJobs.length;
   const today        = new Date().toLocaleDateString();
   const todayJobs    = allJobs.filter(j => new Date(j.createdAt).toLocaleDateString() === today).length;
-  const totalService = allJobs.reduce((s, j) => s + Number(j.service?.serviceCharge || 0), 0);
+  // ✅ FIX — lifetime totals (rebill-safe) instead of raw top-level fields
+  const totalService = allJobs.reduce((s, j) => s + getServiceTotal(j), 0);
   const totalSpare   = allJobs.reduce((s, j) => s + Number(j.service?.spareCharge   || 0), 0);
-  const totalIncome  = allJobs.reduce((s, j) => s + Number(j.service?.income        || 0), 0);
-  const totalOthers  = allJobs.reduce((s, j) => s + Number(j.service?.othersAmount  || 0), 0);
+  const totalIncome  = allJobs.reduce((s, j) => s + getIncomeTotal(j), 0);
+  const totalOthers  = allJobs.reduce((s, j) => s + getOthersTotal(j), 0);
   const totalAdvance = allJobs.reduce((s, j) => s + Number(j.service?.advanceAmount || 0), 0);
   const grandTotal   = totalService + totalSpare + totalIncome + totalOthers;
   const totalInstaYes  = allJobs.filter(j => j.service?.instaFollowers === "Yes").length;
@@ -234,10 +377,11 @@ const ServiceRepReportPage = () => {
 
   const repSummaries = repList.map((rep) => {
     const jobs = data[rep];
-    const sc  = jobs.reduce((s, j) => s + Number(j.service?.serviceCharge || 0), 0);
+    // ✅ FIX — lifetime totals (rebill-safe) instead of raw top-level fields
+    const sc  = jobs.reduce((s, j) => s + getServiceTotal(j), 0);
     const sp  = jobs.reduce((s, j) => s + Number(j.service?.spareCharge   || 0), 0);
-    const inc = jobs.reduce((s, j) => s + Number(j.service?.income        || 0), 0);
-    const oth = jobs.reduce((s, j) => s + Number(j.service?.othersAmount  || 0), 0);
+    const inc = jobs.reduce((s, j) => s + getIncomeTotal(j), 0);
+    const oth = jobs.reduce((s, j) => s + getOthersTotal(j), 0);
     const adv = jobs.reduce((s, j) => s + Number(j.service?.advanceAmount || 0), 0);
     const instaYes  = jobs.filter(j => j.service?.instaFollowers === "Yes").length;
     const googleYes = jobs.filter(j => j.service?.googleReview   === "Yes").length;
@@ -256,10 +400,11 @@ const ServiceRepReportPage = () => {
     const rows = [];
     repList.forEach(rep => {
       data[rep].forEach((job, i) => {
-        const sc  = Number(job.service?.serviceCharge || 0);
+        // ✅ FIX — lifetime totals (rebill-safe) in the Excel export too
+        const sc  = getServiceTotal(job);
         const sp  = Number(job.service?.spareCharge   || 0);
-        const inc = Number(job.service?.income         || 0);
-        const oth = Number(job.service?.othersAmount   || 0);
+        const inc = getIncomeTotal(job);
+        const oth = getOthersTotal(job);
         rows.push({
           "Service Rep":    job.service?.serviceRep || rep,
           "Created By":     job.createdBy?.username || "—",
@@ -402,10 +547,11 @@ const ServiceRepReportPage = () => {
 
       {!loading && view === "table" && repList.map((rep, idx) => {
         const jobs = data[rep];
-        const uSC  = jobs.reduce((s, j) => s + Number(j.service?.serviceCharge || 0), 0);
+        // ✅ FIX — lifetime totals (rebill-safe) for each rep's subtotal chips
+        const uSC  = jobs.reduce((s, j) => s + getServiceTotal(j), 0);
         const uSP  = jobs.reduce((s, j) => s + Number(j.service?.spareCharge   || 0), 0);
-        const uINC = jobs.reduce((s, j) => s + Number(j.service?.income        || 0), 0);
-        const uOTH = jobs.reduce((s, j) => s + Number(j.service?.othersAmount  || 0), 0);
+        const uINC = jobs.reduce((s, j) => s + getIncomeTotal(j), 0);
+        const uOTH = jobs.reduce((s, j) => s + getOthersTotal(j), 0);
         const uADV = jobs.reduce((s, j) => s + Number(j.service?.advanceAmount || 0), 0);
         const uInsta  = jobs.filter(j => j.service?.instaFollowers === "Yes").length;
         const uGoogle = jobs.filter(j => j.service?.googleReview   === "Yes").length;
