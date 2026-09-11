@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import axios from "axios";
 import * as XLSX from "xlsx";
 import {
@@ -38,6 +38,14 @@ const fmt = (n) => n ? "₹" + Number(n).toLocaleString("en-IN") : "₹0";
    idea as Spare — othersItems isn't cleared by rebill either, only the
    top-level othersAmount summary field is. */
 
+const toISODate = (d) => (d ? new Date(d).toISOString().slice(0, 10) : "");
+const inRange  = (isoDate, from, to) => {
+  if (!isoDate) return false;
+  if (from && isoDate < from) return false;
+  if (to && isoDate > to) return false;
+  return true;
+};
+
 const getUncoveredRebillEntries = (job) => {
   const entries = job.service?.revenueEntries || [];
   const rebillHistoryArr = job.rebillHistory || [];
@@ -68,28 +76,93 @@ const getUncoveredRebillEntries = (job) => {
   return uncovered;
 };
 
-const getServiceTotal = (job) => {
-  const entries = job.service?.revenueEntries || [];
+/* ================= RANGE-AWARE TOTALS (FIX — Transaction Date bug) =================
+   🔴 BUG the user hit — with "Transaction Date" filter set to e.g. 01–10 Sept,
+   a job like JS-500 (Thomas) that has an Aug 12 entry (₹4,000) AND a Sept 03
+   entry (₹8,000) matched the filter correctly (it HAS a transaction inside
+   the range), but the row then showed the job's FULL lifetime total ₹12,000
+   — the Aug entry leaking in even though it's outside the selected range.
+
+   ✅ FIX — every total helper below now takes an optional `range` ({from,to}).
+   - range === null (default) → unchanged old behavior: full lifetime total,
+     used everywhere EXCEPT when the Transaction Date filter is actively
+     restricting a period (Received/Delivery/Created filters still show each
+     job's full lifetime value — only Transaction Date restricts the amount
+     itself, since that's the one where "this job had a transaction in this
+     exact window" is the point).
+   - range = {from, to} → only entries whose OWN date falls inside the range
+     are summed (same as ValueReport's per-row Transaction Date logic, just
+     aggregated per job instead of per row). A job with no dated sub-entries
+     at all can't be attributed to a specific period, so it contributes 0
+     when a range is active (instead of leaking its dateless top-level
+     amount into every period). */
+
+const getServiceTotal = (job, range = null) => {
+  const allEntries = job.service?.revenueEntries || [];
+  const entries = range
+    ? allEntries.filter((e) => inRange(toISODate(e.date), range.from, range.to))
+    : allEntries;
   const fromEntries = entries.reduce((s, e) => s + Number(e.service || 0), 0);
-  const fromRebills = getUncoveredRebillEntries(job).reduce((s, rb) => s + Number(rb.serviceCharge || 0), 0);
-  return entries.length > 0
-    ? fromEntries + fromRebills
-    : Number(job.service?.serviceCharge || 0) + fromRebills;
+
+  const allRebills = getUncoveredRebillEntries(job);
+  const rebills = range
+    ? allRebills.filter((rb) => inRange(toISODate(rb.incomeDate || rb.rebilledAt), range.from, range.to))
+    : allRebills;
+  const fromRebills = rebills.reduce((s, rb) => s + Number(rb.serviceCharge || 0), 0);
+
+  if (allEntries.length > 0) return fromEntries + fromRebills;
+  return range ? fromRebills : Number(job.service?.serviceCharge || 0) + fromRebills;
 };
 
-const getIncomeTotal = (job) => {
-  const entries = job.service?.revenueEntries || [];
+const getIncomeTotal = (job, range = null) => {
+  const allEntries = job.service?.revenueEntries || [];
+  const entries = range
+    ? allEntries.filter((e) => inRange(toISODate(e.date), range.from, range.to))
+    : allEntries;
   const fromEntries = entries.reduce((s, e) => s + Number(e.income || 0), 0);
-  const fromRebills = getUncoveredRebillEntries(job).reduce((s, rb) => s + Number(rb.income || 0), 0);
-  return entries.length > 0
-    ? fromEntries + fromRebills
-    : Number(job.service?.income || 0) + fromRebills;
+
+  const allRebills = getUncoveredRebillEntries(job);
+  const rebills = range
+    ? allRebills.filter((rb) => inRange(toISODate(rb.incomeDate || rb.rebilledAt), range.from, range.to))
+    : allRebills;
+  const fromRebills = rebills.reduce((s, rb) => s + Number(rb.income || 0), 0);
+
+  if (allEntries.length > 0) return fromEntries + fromRebills;
+  return range ? fromRebills : Number(job.service?.income || 0) + fromRebills;
 };
 
-const getOthersTotal = (job) => {
+const getOthersTotal = (job, range = null) => {
   const items = job.service?.othersItems || [];
-  if (items.length > 0) return items.reduce((s, oi) => s + Number(oi.amount || 0), 0);
-  return Number(job.service?.othersAmount || 0);
+  const filtered = range ? items.filter((oi) => inRange(toISODate(oi.date), range.from, range.to)) : items;
+  if (items.length > 0) return filtered.reduce((s, oi) => s + Number(oi.amount || 0), 0);
+  return range ? 0 : Number(job.service?.othersAmount || 0);
+};
+
+// ✅ NEW — Spare ₹ was always read from the raw cumulative service.spareCharge
+// field, which has no date of its own. When Transaction Date restricts to a
+// period, spare has to come from the dated spareItems list instead so it
+// only counts spares actually added in that window.
+const getSpareTotal = (job, range = null) => {
+  const items = job.spareItems || [];
+  const filtered = range ? items.filter((si) => inRange(toISODate(si.date), range.from, range.to)) : items;
+  if (items.length > 0) return filtered.reduce((s, si) => s + Number(si.amount || 0), 0);
+  return range ? 0 : Number(job.service?.spareCharge || 0);
+};
+
+// ✅ NEW — same idea for Advance ₹: use dated advanceItems when a range is
+// active, falling back to the single advanceDate/advanceAmount pair only
+// when there's no advanceItems list.
+const getAdvanceTotal = (job, range = null) => {
+  const items = job.service?.advanceItems || [];
+  if (items.length > 0) {
+    const filtered = range ? items.filter((a) => inRange(toISODate(a.date), range.from, range.to)) : items;
+    return filtered.reduce((s, a) => s + Number(a.amount || 0), 0);
+  }
+  if (range) {
+    const d = job.service?.advanceDate ? toISODate(job.service.advanceDate) : "";
+    return inRange(d, range.from, range.to) ? Number(job.service?.advanceAmount || 0) : 0;
+  }
+  return Number(job.service?.advanceAmount || 0);
 };
 
 /* ================= PER-DATE BREAKDOWN (rebill detail, NEW) =================
@@ -99,8 +172,11 @@ const getOthersTotal = (job) => {
    one date to show (single-cycle jobs stay pill-free — no visual noise),
    so a rebilled job's "already billed vs new cycle" split becomes visible
    right under its amount. */
-const getBreakdown = (job, field) => {
-  const entries = job.service?.revenueEntries || [];
+const getBreakdown = (job, field, range = null) => {
+  const allEntries = job.service?.revenueEntries || [];
+  const entries = range
+    ? allEntries.filter((e) => inRange(toISODate(e.date), range.from, range.to))
+    : allEntries;
   const list = entries
     .filter((e) => Number(e[field] || 0) > 0)
     .map((e) => ({
@@ -109,7 +185,11 @@ const getBreakdown = (job, field) => {
     }));
 
   const rebillField = field === "service" ? "serviceCharge" : "income";
-  getUncoveredRebillEntries(job).forEach((rb) => {
+  const allRebills = getUncoveredRebillEntries(job);
+  const rebills = range
+    ? allRebills.filter((rb) => inRange(toISODate(rb.incomeDate || rb.rebilledAt), range.from, range.to))
+    : allRebills;
+  rebills.forEach((rb) => {
     const amt = Number(rb[rebillField] || 0);
     if (amt <= 0) return;
     const d = rb.incomeDate || rb.rebilledAt;
@@ -142,6 +222,63 @@ const BreakdownPills = ({ items, color }) => {
       ))}
     </div>
   );
+};
+
+/* ================= DATE TYPE FILTER (NEW — same idea as ValueReport.jsx) =================
+   Unlike ValueReport (one row per transaction), this page is one row per JOB —
+   JobRow shows a job's lifetime totals in a single row. So a date-type filter
+   here has to decide, per JOB, whether it belongs in the range:
+
+     "received" / "created" → job.createdAt (this is what the "Received Date"
+                               column on this page already shows)
+     "delivery"              → job.service?.deliveryDate
+     "transaction"           → the job matches if ANY of its dated entries
+                               (revenueEntries / spareItems / othersItems /
+                               advanceItems / an uncovered rebillHistory
+                               cycle) falls inside the range. This is the one
+                               to pick for month-wise revenue-style checks
+                               that must catch a rebilled job even if its
+                               original received/created date is outside the
+                               month — same reasoning as ValueReport's
+                               Transaction Date option.
+
+   Filtering is done CLIENT-SIDE against the full fetched dataset (rawData),
+   so switching the Date Type dropdown re-filters instantly without another
+   API round-trip, and the fromDate/toDate inputs now drive whichever date
+   field is currently selected instead of always being sent to the backend. */
+
+const jobMatchesDateFilter = (job, type, from, to) => {
+  if (!from && !to) return true;
+
+  if (type === "delivery") {
+    const d = job.service?.deliveryDate ? toISODate(job.service.deliveryDate) : "";
+    if (!d) return false;
+    return (!from || d >= from) && (!to || d <= to);
+  }
+
+  if (type === "transaction") {
+    const dates = [];
+    (job.service?.revenueEntries || []).forEach((e) => e.date && dates.push(toISODate(e.date)));
+    (job.spareItems || []).forEach((si) => si.date && dates.push(toISODate(si.date)));
+    (job.service?.othersItems || []).forEach((oi) => oi.date && dates.push(toISODate(oi.date)));
+    (job.service?.advanceItems || []).forEach((a) => a.date && dates.push(toISODate(a.date)));
+    getUncoveredRebillEntries(job).forEach((rb) => {
+      const d = rb.incomeDate || rb.rebilledAt;
+      if (d) dates.push(toISODate(d));
+    });
+    // job with no dated sub-entries at all (no revenueEntries/spare/others/advance/
+    // rebill rows) — fall back to createdAt so it doesn't just vanish from every filter
+    if (dates.length === 0) {
+      const fallback = toISODate(job.createdAt);
+      if (fallback) dates.push(fallback);
+    }
+    return dates.some((d) => d && (!from || d >= from) && (!to || d <= to));
+  }
+
+  // "received" / "created" (default)
+  const d = toISODate(job.createdAt);
+  if (!d) return false;
+  return (!from || d >= from) && (!to || d <= to);
 };
 
 const statusColors = {
@@ -196,6 +333,27 @@ const SummaryCard = ({ label, value, accent, icon }) => (
   </div>
 );
 
+// ✅ NEW — Adv. Date must agree with whatever Advance ₹ is showing. When a
+// Transaction Date range is active and Advance ₹ is restricted to just the
+// in-range advance(s), the date shown here must be an in-range advance date
+// too — otherwise you get exactly the bug reported: Advance ₹ shows "—" (0,
+// correctly excluded) but Adv. Date still shows an August date that belongs
+// to an advance outside the selected Sept window, which looks contradictory.
+const getAdvanceDateDisplay = (job, range = null) => {
+  const items = job.service?.advanceItems || [];
+  if (items.length > 0) {
+    const filtered = range ? items.filter((a) => inRange(toISODate(a.date), range.from, range.to)) : items;
+    if (filtered.length === 0) return null;
+    const sorted = [...filtered].sort((a, b) => new Date(a.date) - new Date(b.date));
+    return sorted[sorted.length - 1].date;
+  }
+  if (range) {
+    const d = job.service?.advanceDate ? toISODate(job.service.advanceDate) : "";
+    return inRange(d, range.from, range.to) ? job.service.advanceDate : null;
+  }
+  return job.service?.advanceDate || null;
+};
+
 const JOB_HEADERS = [
   "#", "Job Sheet", "Service Rep", "Created By", "Customer",
   "Contact", "Device", "Status",
@@ -204,16 +362,20 @@ const JOB_HEADERS = [
   "Received Date", "Delivered Date"
 ];
 
-const JobRow = ({ job, i, rep }) => {
-  // ✅ FIX — Service ₹ / Income ₹ / Others ₹ now use the lifetime totals
-  // (rebill-safe), not the raw top-level fields that reset to 0 on rebill.
-  const sc  = getServiceTotal(job);
-  const sp  = Number(job.service?.spareCharge   || 0);   // already cumulative
-  const inc = getIncomeTotal(job);
-  const oth = getOthersTotal(job);
-  const adv = Number(job.service?.advanceAmount || 0);   // not touched by rebill
-  const serviceBreakdown = getBreakdown(job, "service");
-  const incomeBreakdown  = getBreakdown(job, "income");
+const JobRow = ({ job, i, rep, range = null }) => {
+  // ✅ FIX — Service ₹ / Income ₹ / Others ₹ / Spare ₹ / Advance ₹ use lifetime
+  // totals (rebill-safe) by default. When `range` is passed (Transaction Date
+  // filter active with a from/to set), every amount is restricted to just the
+  // entries whose OWN date falls inside that range — this is what stops a job
+  // like JS-500 (Aug ₹4,000 + Sept ₹8,000) from showing its full ₹12,000 when
+  // you've filtered for Sept only; it now shows just the ₹8,000 Sept portion.
+  const sc  = getServiceTotal(job, range);
+  const sp  = getSpareTotal(job, range);
+  const inc = getIncomeTotal(job, range);
+  const oth = getOthersTotal(job, range);
+  const adv = getAdvanceTotal(job, range);
+  const serviceBreakdown = getBreakdown(job, "service", range);
+  const incomeBreakdown  = getBreakdown(job, "income", range);
   return (
     <tr style={{ borderBottom: "1px solid #f0f0f0" }}
       onMouseEnter={e => e.currentTarget.style.background = "#f8f9fa"}
@@ -247,9 +409,9 @@ const JobRow = ({ job, i, rep }) => {
       <td style={{ padding: "8px 10px", color: "#0d6efd", fontWeight: 500 }}>{adv ? fmt(adv) : "—"}</td>
       <td style={{ padding: "8px 10px", color: "#0369a1", fontSize: 11, whiteSpace: "nowrap" }}>
         {(() => {
-          // ✅ FIX — fall back to the latest advanceItems date when the
-          // single service.advanceDate field was never set (multi-item advances).
-          const advDate = job.service?.advanceDate || job.service?.advanceItems?.slice(-1)[0]?.date;
+          // ✅ FIX — respects `range` so this date can't disagree with the
+          // (possibly range-restricted) Advance ₹ amount shown beside it
+          const advDate = getAdvanceDateDisplay(job, range);
           return advDate
             ? new Date(advDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" })
             : "—";
@@ -326,7 +488,10 @@ const ServiceRepReportPage = () => {
   const currentDisplayName = currentUser?.name || currentUser?.username || "";
   const currentName        = currentUsername || currentDisplayName;
 
-  const [data,       setData]       = useState({});
+  // ✅ raw = everything fetched from the backend for the current rep-name search
+  //    (NOT date-filtered server-side anymore — date filtering happens client-side
+  //    below via jobMatchesDateFilter, so switching Date Type / dates is instant).
+  const [rawData,    setRawData]    = useState({});
   const [loading,    setLoading]    = useState(false);
   const [searchText, setSearchText] = useState("");
   const [fromDate,   setFromDate]   = useState("");
@@ -334,55 +499,116 @@ const ServiceRepReportPage = () => {
   const [repFilter,  setRepFilter]  = useState("");
   const [view,       setView]       = useState("table");
 
+  // ✅ NEW — Job No / Customer Name / Phone Number search (client-side, works
+  // on top of whatever the rep-name search + date filter already narrowed down to)
+  const [jobSearchText, setJobSearchText] = useState("");
+
+  // ✅ NEW — Date Type selector, same 4 options as ValueReport.jsx
+  const [dateFilterType, setDateFilterType] = useState("received"); // "received" | "delivery" | "created" | "transaction"
+
   useEffect(() => {
     if (currentRole !== "admin") {
-      fetchData(currentName, "", "");
+      fetchData(currentName);
     } else {
       fetchData();
     }
   }, []);
 
-  const fetchData = async (search = "", from = "", to = "") => {
+  // ✅ date params no longer sent to the backend — only the rep-name search
+  // goes server-side, all date filtering happens client-side below.
+  const fetchData = async (search = "") => {
     try {
       setLoading(true);
       const res = await axios.get(`${API}/api/jobsheets/salesrep-report`, {
-        params: { salesRep: search || undefined, fromDate: from || undefined, toDate: to || undefined },
+        params: { salesRep: search || undefined },
       });
-      setData(res.data || {});
+      setRawData(res.data || {});
     } catch (err) {
       console.error("FETCH ERROR:", err);
-      setData({});
+      setRawData({});
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSearch = () => fetchData(searchText, fromDate, toDate);
-  const handleClear  = () => { setSearchText(""); setFromDate(""); setToDate(""); fetchData(); };
+  const handleSearch = () => fetchData(searchText);
+  const handleClear  = () => { setSearchText(""); setFromDate(""); setToDate(""); setDateFilterType("received"); setJobSearchText(""); fetchData(); };
+
+  // ✅ NEW — client-side date-type filter + Job No/Name/Phone text filter, both
+  // applied on top of rawData. Recomputes instantly on every keystroke / date
+  // change / dropdown change, no extra API call needed.
+  const data = useMemo(() => {
+    let out = rawData;
+
+    if (fromDate || toDate) {
+      const byDate = {};
+      Object.keys(out).forEach((rep) => {
+        const jobs = out[rep].filter((j) => jobMatchesDateFilter(j, dateFilterType, fromDate, toDate));
+        if (jobs.length > 0) byDate[rep] = jobs;
+      });
+      out = byDate;
+    }
+
+    const q = jobSearchText.trim().toLowerCase();
+    if (q) {
+      const bySearch = {};
+      Object.keys(out).forEach((rep) => {
+        const jobs = out[rep].filter((j) => {
+          const jobNo = (j.jobSheetNo || "").toLowerCase();
+          const name  = (j.customer?.name || "").toLowerCase();
+          const phone = (j.customer?.contact || "").toLowerCase();
+          const alt   = (j.customer?.altContact || "").toLowerCase();
+          return jobNo.includes(q) || name.includes(q) || phone.includes(q) || alt.includes(q);
+        });
+        if (jobs.length > 0) bySearch[rep] = jobs;
+      });
+      out = bySearch;
+    }
+
+    return out;
+  }, [rawData, dateFilterType, fromDate, toDate, jobSearchText]);
+
+  // ✅ human label for whichever date type is active, shown next to the dropdown
+  const dateTypeLabel = dateFilterType === "delivery" ? "Delivery Date"
+    : dateFilterType === "transaction" ? "Transaction Date"
+    : dateFilterType === "created" ? "Created Date"
+    : "Received Date";
+
+  // ✅ FIX (the Transaction Date amount bug) — only Transaction Date restricts
+  // the AMOUNTS themselves to the selected window; Received/Delivery/Created
+  // still show each job's full lifetime value (they just decide which date
+  // groups the job under). activeRange = null everywhere else, so
+  // getServiceTotal/getIncomeTotal/etc fall back to their old full-lifetime
+  // behavior unchanged.
+  const activeRange = (dateFilterType === "transaction" && (fromDate || toDate))
+    ? { from: fromDate || "", to: toDate || "" }
+    : null;
 
   const allJobs      = Object.values(data).flat();
   const repList      = Object.keys(data).sort();
   const totalJobs    = allJobs.length;
   const today        = new Date().toLocaleDateString();
   const todayJobs    = allJobs.filter(j => new Date(j.createdAt).toLocaleDateString() === today).length;
-  // ✅ FIX — lifetime totals (rebill-safe) instead of raw top-level fields
-  const totalService = allJobs.reduce((s, j) => s + getServiceTotal(j), 0);
-  const totalSpare   = allJobs.reduce((s, j) => s + Number(j.service?.spareCharge   || 0), 0);
-  const totalIncome  = allJobs.reduce((s, j) => s + getIncomeTotal(j), 0);
-  const totalOthers  = allJobs.reduce((s, j) => s + getOthersTotal(j), 0);
-  const totalAdvance = allJobs.reduce((s, j) => s + Number(j.service?.advanceAmount || 0), 0);
+  // ✅ FIX — lifetime totals (rebill-safe) by default, range-restricted when
+  // Transaction Date filter is active
+  const totalService = allJobs.reduce((s, j) => s + getServiceTotal(j, activeRange), 0);
+  const totalSpare   = allJobs.reduce((s, j) => s + getSpareTotal(j, activeRange), 0);
+  const totalIncome  = allJobs.reduce((s, j) => s + getIncomeTotal(j, activeRange), 0);
+  const totalOthers  = allJobs.reduce((s, j) => s + getOthersTotal(j, activeRange), 0);
+  const totalAdvance = allJobs.reduce((s, j) => s + getAdvanceTotal(j, activeRange), 0);
   const grandTotal   = totalService + totalSpare + totalIncome + totalOthers;
   const totalInstaYes  = allJobs.filter(j => j.service?.instaFollowers === "Yes").length;
   const totalGoogleYes = allJobs.filter(j => j.service?.googleReview   === "Yes").length;
 
   const repSummaries = repList.map((rep) => {
     const jobs = data[rep];
-    // ✅ FIX — lifetime totals (rebill-safe) instead of raw top-level fields
-    const sc  = jobs.reduce((s, j) => s + getServiceTotal(j), 0);
-    const sp  = jobs.reduce((s, j) => s + Number(j.service?.spareCharge   || 0), 0);
-    const inc = jobs.reduce((s, j) => s + getIncomeTotal(j), 0);
-    const oth = jobs.reduce((s, j) => s + getOthersTotal(j), 0);
-    const adv = jobs.reduce((s, j) => s + Number(j.service?.advanceAmount || 0), 0);
+    // ✅ FIX — lifetime totals (rebill-safe) by default, range-restricted when
+    // Transaction Date filter is active
+    const sc  = jobs.reduce((s, j) => s + getServiceTotal(j, activeRange), 0);
+    const sp  = jobs.reduce((s, j) => s + getSpareTotal(j, activeRange), 0);
+    const inc = jobs.reduce((s, j) => s + getIncomeTotal(j, activeRange), 0);
+    const oth = jobs.reduce((s, j) => s + getOthersTotal(j, activeRange), 0);
+    const adv = jobs.reduce((s, j) => s + getAdvanceTotal(j, activeRange), 0);
     const instaYes  = jobs.filter(j => j.service?.instaFollowers === "Yes").length;
     const googleYes = jobs.filter(j => j.service?.googleReview   === "Yes").length;
     const statusCount = {};
@@ -400,11 +626,13 @@ const ServiceRepReportPage = () => {
     const rows = [];
     repList.forEach(rep => {
       data[rep].forEach((job, i) => {
-        // ✅ FIX — lifetime totals (rebill-safe) in the Excel export too
-        const sc  = getServiceTotal(job);
-        const sp  = Number(job.service?.spareCharge   || 0);
-        const inc = getIncomeTotal(job);
-        const oth = getOthersTotal(job);
+        // ✅ FIX — lifetime totals (rebill-safe) by default, range-restricted
+        // when Transaction Date filter is active, in the Excel export too
+        const sc  = getServiceTotal(job, activeRange);
+        const sp  = getSpareTotal(job, activeRange);
+        const inc = getIncomeTotal(job, activeRange);
+        const oth = getOthersTotal(job, activeRange);
+        const adv = getAdvanceTotal(job, activeRange);
         rows.push({
           "Service Rep":    job.service?.serviceRep || rep,
           "Created By":     job.createdBy?.username || "—",
@@ -417,7 +645,7 @@ const ServiceRepReportPage = () => {
           "Service Charge": sc,
           "Spare Charge":   sp,
           "Others":         oth,
-          "Advance":        Number(job.service?.advanceAmount || 0),
+          "Advance":        adv,
           "Advance Date":   job.service?.advanceDate
             ? new Date(job.service.advanceDate).toLocaleDateString("en-IN")
             : "—",
@@ -435,7 +663,7 @@ const ServiceRepReportPage = () => {
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "SalesRep Report");
-    XLSX.writeFile(wb, `SalesRepReport_${new Date().toLocaleDateString("en-GB").replace(/\//g, "-")}.xlsx`);
+    XLSX.writeFile(wb, `SalesRepReport_${dateFilterType}_${new Date().toLocaleDateString("en-GB").replace(/\//g, "-")}.xlsx`);
   };
 
   return (
@@ -499,6 +727,54 @@ const ServiceRepReportPage = () => {
         <SummaryCard label="Google Review" value={totalGoogleYes}     accent="#d97706" icon={<FaStar size={11} color="#d97706" />} />
       </div>
 
+      {/* ✅ NEW — Date Type selector + Job No/Name/Phone search, shared by both admin & non-admin filter rows below */}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
+        <label style={{ fontSize: 11, color: "#6c757d", fontWeight: 600 }}>DATE TYPE</label>
+        <select
+          value={dateFilterType}
+          onChange={(e) => setDateFilterType(e.target.value)}
+          className="form-select"
+          style={{ maxWidth: 260, fontSize: 13, fontWeight: 600, color: "#1e293b" }}
+        >
+          <option value="received">Received Date</option>
+          <option value="delivery">Delivery Date</option>
+          <option value="created">Created Date</option>
+          <option value="transaction">Transaction Date (recommended for monthly revenue)</option>
+        </select>
+
+        <label style={{ fontSize: 11, color: "#6c757d", fontWeight: 600, marginLeft: 10 }}>SEARCH</label>
+        <div style={{ position: "relative", width: 240 }}>
+          <input
+            type="text"
+            className="form-control"
+            placeholder="Job No / Name / Phone"
+            value={jobSearchText}
+            onChange={(e) => setJobSearchText(e.target.value)}
+            style={{ fontSize: 13, paddingRight: jobSearchText ? 28 : 12 }}
+          />
+          {jobSearchText && (
+            <button
+              type="button"
+              onClick={() => setJobSearchText("")}
+              title="Clear search"
+              style={{
+                position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)",
+                border: "none", background: "transparent", color: "#94a3b8",
+                cursor: "pointer", display: "flex", alignItems: "center", padding: 2,
+              }}
+            >
+              <FaTimes size={12} />
+            </button>
+          )}
+        </div>
+
+        <span style={{ fontSize: 12, color: "#94a3b8" }}>
+          Filtered by <b style={{ color: "#334155" }}>{dateTypeLabel}</b>:{" "}
+          {fromDate || toDate ? `${fromDate || "All"} → ${toDate || "All"}` : "All Dates"}
+          {jobSearchText.trim() && <> · matching "<b style={{ color: "#334155" }}>{jobSearchText.trim()}</b>"</>}
+        </span>
+      </div>
+
       {currentRole === "admin" ? (
         <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap", alignItems: "flex-end" }}>
           <input className="form-control" style={{ maxWidth: 240 }}
@@ -515,7 +791,7 @@ const ServiceRepReportPage = () => {
             <input type="date" className="form-control" style={{ maxWidth: 150 }} value={toDate} onChange={e => setToDate(e.target.value)} />
           </div>
           <button className="btn btn-primary d-flex align-items-center gap-1" onClick={handleSearch}><FaSearch size={12} /> Search</button>
-          {(searchText || fromDate || toDate) && (
+          {(searchText || fromDate || toDate || jobSearchText) && (
             <button className="btn btn-outline-secondary d-flex align-items-center gap-1" onClick={handleClear}><FaTimes size={12} /> Clear</button>
           )}
           <button className="btn btn-success ms-auto d-flex align-items-center gap-1" onClick={handleExcel} disabled={repList.length === 0}>
@@ -532,7 +808,10 @@ const ServiceRepReportPage = () => {
             <div style={{ fontSize: 11, color: "#6c757d", marginBottom: 3 }}>To</div>
             <input type="date" className="form-control" style={{ maxWidth: 150 }} value={toDate} onChange={e => setToDate(e.target.value)} />
           </div>
-          <button className="btn btn-primary d-flex align-items-center gap-1" onClick={() => fetchData(currentName, fromDate, toDate)}><FaSearch size={12} /> Search</button>
+          <button className="btn btn-primary d-flex align-items-center gap-1" onClick={() => fetchData(currentName)}><FaSearch size={12} /> Search</button>
+          {(fromDate || toDate || jobSearchText) && (
+            <button className="btn btn-outline-secondary d-flex align-items-center gap-1" onClick={handleClear}><FaTimes size={12} /> Clear</button>
+          )}
           <button className="btn btn-success ms-auto d-flex align-items-center gap-1" onClick={handleExcel} disabled={repList.length === 0}>
             <FaFileExcel size={13} /> Excel
           </button>
@@ -547,12 +826,13 @@ const ServiceRepReportPage = () => {
 
       {!loading && view === "table" && repList.map((rep, idx) => {
         const jobs = data[rep];
-        // ✅ FIX — lifetime totals (rebill-safe) for each rep's subtotal chips
-        const uSC  = jobs.reduce((s, j) => s + getServiceTotal(j), 0);
-        const uSP  = jobs.reduce((s, j) => s + Number(j.service?.spareCharge   || 0), 0);
-        const uINC = jobs.reduce((s, j) => s + getIncomeTotal(j), 0);
-        const uOTH = jobs.reduce((s, j) => s + getOthersTotal(j), 0);
-        const uADV = jobs.reduce((s, j) => s + Number(j.service?.advanceAmount || 0), 0);
+        // ✅ FIX — lifetime totals (rebill-safe) by default, range-restricted
+        // when Transaction Date filter is active, for each rep's subtotal chips
+        const uSC  = jobs.reduce((s, j) => s + getServiceTotal(j, activeRange), 0);
+        const uSP  = jobs.reduce((s, j) => s + getSpareTotal(j, activeRange), 0);
+        const uINC = jobs.reduce((s, j) => s + getIncomeTotal(j, activeRange), 0);
+        const uOTH = jobs.reduce((s, j) => s + getOthersTotal(j, activeRange), 0);
+        const uADV = jobs.reduce((s, j) => s + getAdvanceTotal(j, activeRange), 0);
         const uInsta  = jobs.filter(j => j.service?.instaFollowers === "Yes").length;
         const uGoogle = jobs.filter(j => j.service?.googleReview   === "Yes").length;
 
@@ -590,7 +870,7 @@ const ServiceRepReportPage = () => {
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <TableHead />
                 <tbody>
-                  {jobs.map((job, i) => <JobRow key={job._id} job={job} i={i} rep={rep} />)}
+                  {jobs.map((job, i) => <JobRow key={job._id} job={job} i={i} rep={rep} range={activeRange} />)}
 
                   <tr style={{ background: "#f0fdf4", borderTop: "2px solid #bbf7d0" }}>
                     <td colSpan={8} style={{ padding: "8px 10px", fontWeight: 700, fontSize: 13, color: "#166534" }}>Subtotal — {rep}</td>
@@ -717,7 +997,7 @@ const ServiceRepReportPage = () => {
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                     <TableHead />
                     <tbody>
-                      {dashJobs.map((job, i) => <JobRow key={job._id} job={job} i={i} rep={dashRep} />)}
+                      {dashJobs.map((job, i) => <JobRow key={job._id} job={job} i={i} rep={dashRep} range={activeRange} />)}
                     </tbody>
                   </table>
                 </div>
