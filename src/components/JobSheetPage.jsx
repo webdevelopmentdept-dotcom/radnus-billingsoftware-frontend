@@ -310,7 +310,20 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
   const navigate = useNavigate();
   const [jobSheetNo, setJobSheetNo] = useState("");
   const [saving, setSaving] = useState(false);
+  const [updating, setUpdating] = useState(false);
   const [rebilling, setRebilling] = useState(false);
+  // ================= DUPLICATE-SUBMIT GUARD REFS (NEW) =================
+  // 🔴 WHY REFS AND NOT JUST STATE: setSaving/setUpdating are async — React doesn't
+  // repaint "disabled" onto the button instantly. If the user (or a slow network /
+  // accidental second tap) fires the click handler twice within that same tick, BOTH
+  // calls still read the OLD state ("not saving/updating yet") and both go through —
+  // two parallel PUT/POST requests hit the backend at the same time. This is exactly
+  // what caused JS-598's revenueEntries to end up with duplicate rows for the same
+  // day: two Update calls racing each other. A ref updates synchronously the instant
+  // we set it, so the very next line of code (even before React re-renders) already
+  // sees the new value — the second click is blocked for real.
+  const savingRef = React.useRef(false);
+  const updatingRef = React.useRef(false);
   const pendingNextNo = React.useRef(null);
   const API = import.meta.env.VITE_API_URL;
   const loggedInUser = JSON.parse(sessionStorage.getItem("user") || "{}");
@@ -1079,7 +1092,23 @@ const today = new Date().toLocaleDateString("en-CA");
   };
 
   /* ================= UPDATE ================= */
+  // ================= DUPLICATE-SUBMIT GUARD (NEW) =================
+  // 🔴 ROOT CAUSE OF THE JS-598 6x DUPLICATE BUG: this function previously had ZERO
+  // protection against being called twice — no state guard, no ref guard, no disabled
+  // button while the request was in flight. If "Update" got clicked twice quickly
+  // (slow network, accidental double tap, or a stuck spinner tempting a second click),
+  // two PUT /api/jobsheets/:id requests fired at almost the same instant. Both read the
+  // SAME "before" revenueEntries from the DB, both computed their own "today's entry",
+  // and both wrote it back — the second write didn't know about the first, so instead
+  // of one row for the day you got extra duplicate rows. Guarding here with a
+  // synchronous ref (updatingRef) closes that race window completely — the second
+  // click is rejected before any network call is even made.
   const handleUpdate = async () => {
+    if (updating || updatingRef.current) return;
+    updatingRef.current = true;
+    setUpdating(true);
+
+    try {
     if (!validateAll()) { window.scrollTo({ top: 0, behavior: "smooth" }); return; }
     if (repairDate && deliveryDate && new Date(deliveryDate) < new Date(repairDate)) {
       showToast("Delivery Date cannot be before Repair Date", "warning");
@@ -1153,19 +1182,33 @@ const today = new Date().toLocaleDateString("en-CA");
       console.error(err);
       showToast("Update failed", "error");
     }
+    } finally {
+      // ✅ always release the guard, whether Update succeeded, failed validation,
+      // failed the date check, or the API call itself failed — otherwise a single
+      // failed attempt would permanently lock the button.
+      updatingRef.current = false;
+      setUpdating(false);
+    }
   };
 
   /* ================= SAVE ================= */
 
   const handleSave = async () => {
 
-    if (saving) return;
+    // ================= DUPLICATE-SUBMIT GUARD (STRENGTHENED) =================
+    // Old code only checked `if (saving) return;` — state-only guard, vulnerable to the
+    // same "two clicks in the same tick both see old state" race explained above. Now
+    // checks the ref FIRST (synchronous, instant) before falling back to state.
+    if (saving || savingRef.current) return;
+    savingRef.current = true;
 
     if (!validateAll()) {
+      savingRef.current = false;
       window.scrollTo({ top: 0, behavior: "smooth" });
       return;
     }
     if (repairDate && deliveryDate && new Date(deliveryDate) < new Date(repairDate)) {
+      savingRef.current = false;
       showToast("Delivery Date cannot be before Repair Date", "warning");
       return;
     }
@@ -1177,6 +1220,7 @@ const today = new Date().toLocaleDateString("en-CA");
     if (!user || !user.username) {
       showToast("Session expired! Please logout and login again, then try saving.", "error");
       setSaving(false);
+      savingRef.current = false;
       return;
     }
 
@@ -1233,6 +1277,7 @@ const today = new Date().toLocaleDateString("en-CA");
       showToast("Save failed", "error");
     } finally {
       setSaving(false);
+      savingRef.current = false;
     }
   };
 
@@ -2769,8 +2814,8 @@ const today = new Date().toLocaleDateString("en-CA");
           )}
 
           {isEdit && !localEditData?.isCancelled && (
-            <button style={{ ...sideBtnSave, width: "auto" }} onClick={handleUpdate}>
-              <Save size={16} /> {localEditData?.rebillPending ? "Save Rebill" : "Update"}
+            <button style={{ ...sideBtnSave, width: "auto" }} onClick={handleUpdate} disabled={updating}>
+              <Save size={16} /> {updating ? "Updating..." : (localEditData?.rebillPending ? "Save Rebill" : "Update")}
             </button>
           )}
 
