@@ -973,6 +973,7 @@ const today = new Date().toLocaleDateString("en-CA");
   // used to detect whether the user genuinely changed Income this session.
   const initialIncomeRef = React.useRef(0);
    const spareBaselineRef = React.useRef(0);
+   const advanceBaselineRef = React.useRef(0);   // ✅ NEW
   const [repairDate, setRepairDate] = useState(today);
   const [deliveryDate, setDeliveryDate] = useState("");
   const [remarks, setRemarks] = useState("");
@@ -1109,6 +1110,7 @@ const today = new Date().toLocaleDateString("en-CA");
   serviceCharge: Number(serviceCharge || 0),
   spareCharge: Number(spareCharge || 0),
   spareBaseline: spareBaselineRef.current,   // 👈 இந்த ஒரு line add பண்ணு
+    advanceBaseline: advanceBaselineRef.current, 
   income: incomeNum,
   incomeDate: finalIncomeDate,
 
@@ -1275,6 +1277,7 @@ const today = new Date().toLocaleDateString("en-CA");
     setOthersItems([]);
        setSpareItems([]);
     spareBaselineRef.current = 0;
+    advanceBaselineRef.current = 0;   // ✅ NEW
     setIncome("");
     setIncomeDate("");
     setIncomeDateTouched(false); // reset manual-pick flag on New
@@ -1355,6 +1358,7 @@ const today = new Date().toLocaleDateString("en-CA");
     // every reopen after the first save, causing the full cumulative spare
     // total to count as "current cycle" instead of just the new spares.
     spareBaselineRef.current = Number(editData.service?.spareBaseline || 0);
+    advanceBaselineRef.current = Number(editData.service?.advanceBaseline || 0); 
     setOthersAmount(editData.service?.othersAmount || "");
     setOthersItems(editData.service?.othersItems || []);
     setIncome(editData.service?.income || "");
@@ -2395,18 +2399,22 @@ const today = new Date().toLocaleDateString("en-CA");
                         )}
                       </div>
 
-                      <div className="col-md-6">
-                        <Field label="Advance Amount ">
-                          <input
-                            type="text"
-                            className="form-control form-control-sm"
-                            placeholder="Tap to add"
-                            value={advanceAmount}
-                            readOnly
-                            onClick={() => setShowAdvancePopup(true)}
-                            style={{ cursor: "pointer", background: "#f8f9fa" }}
-                          />
-                        </Field>
+                     <div className="col-md-6">
+  <Field label="Advance Amount ">
+    <input
+      type="text"
+      className="form-control form-control-sm"
+      placeholder="Tap to add"
+      value={
+        Math.max(0, Number(advanceAmount || 0) - advanceBaselineRef.current) > 0
+          ? Math.max(0, Number(advanceAmount || 0) - advanceBaselineRef.current)
+          : ""
+      }
+      readOnly
+      onClick={() => setShowAdvancePopup(true)}
+      style={{ cursor: "pointer", background: "#f8f9fa" }}
+    />
+  </Field>
                         {advanceItems.length > 0 && (
                           <div style={{ fontSize: 10, color: "#0d6efd", marginTop: 2, fontWeight: 500, display: "flex", alignItems: "center", gap: 4 }}>
                             <Wallet size={11} /> {advanceItems.length} payment{advanceItems.length > 1 ? "s" : ""}
@@ -2737,6 +2745,7 @@ const today = new Date().toLocaleDateString("en-CA");
               setAdvanceAmount={setAdvanceAmount}
               setAdvanceItems={setAdvanceItems}
               existingItems={advanceItems}
+                advanceBaselineAmount={advanceBaselineRef.current}   // ✅ NEW
               referenceData={{ income, service: serviceCharge, spare: spareCharge, others: othersAmount }}
             />
           )}
@@ -2841,6 +2850,7 @@ const today = new Date().toLocaleDateString("en-CA");
                   setSpareItems(res.data.spareItems || []);
                   spareBaselineRef.current = (res.data.spareItems || [])
                     .reduce((s, it) => s + Number(it.amount || 0), 0);
+                    advanceBaselineRef.current = Number(res.data.service?.advanceBaseline || 0);  
                   setRemarks("");
                   setIncome("");
                   setIncomeDate("");

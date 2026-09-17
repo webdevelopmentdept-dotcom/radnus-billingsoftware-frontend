@@ -1,15 +1,32 @@
 import React, { useState } from "react";
 
-const AdvancePopup = ({ onClose, setAdvanceAmount, setAdvanceItems, existingItems = [] }) => {
+const AdvancePopup = ({ onClose, setAdvanceAmount, setAdvanceItems, existingItems = [], advanceBaselineAmount = 0 }) => {
   const today = new Date().toISOString().split("T")[0];
 
-  // ✅ KEY FIX: useEffect இல்லாம, mount-ல் மட்டும் copy எடு
   const [advances, setAdvances] = useState(() => [...existingItems]);
   const [name, setName] = useState("");
   const [amount, setAmount] = useState("");
   const [date, setDate] = useState(today);
 
-  const total = advances.reduce((sum, a) => sum + Number(a.amount || 0), 0);
+  // ✅ cumulative total (ALL items, all cycles) — this is what gets saved to
+  // service.advanceAmount, same pattern as SparePopup's cumulativeTotal.
+  const cumulativeTotal = advances.reduce((sum, a) => sum + Number(a.amount || 0), 0);
+
+  // ✅ AMOUNT-based split (not date-based) — identical logic to SparePopup.
+  // advanceBaselineAmount is an exact snapshot of cumulativeTotal taken at the
+  // real moment of rebill, so walking items IN ORDER and marking an item "old"
+  // as long as the running sum-so-far is still under the baseline always lands
+  // exactly on the pre-rebill / post-rebill boundary.
+  let runningSum = 0;
+  const advancesWithCycle = advances.map((a, idx) => {
+    const isOld = runningSum < advanceBaselineAmount;
+    runningSum += Number(a.amount || 0);
+    return { item: a, idx, isOld };
+  });
+
+  const currentCycleItems = advancesWithCycle.filter(({ isOld }) => !isOld);
+  const total = currentCycleItems.reduce((sum, { item }) => sum + Number(item.amount || 0), 0);
+  const hasRebillSplit = advanceBaselineAmount > 0;
 
   const handleAdd = () => {
     if (!amount || Number(amount) <= 0) return alert("Enter valid amount");
@@ -26,8 +43,8 @@ const AdvancePopup = ({ onClose, setAdvanceAmount, setAdvanceItems, existingItem
   const handleRemove = (i) => setAdvances(prev => prev.filter((_, idx) => idx !== i));
 
   const handleSave = () => {
-    setAdvanceItems(advances);
-    setAdvanceAmount(String(total));
+    setAdvanceItems(advances);              // ✅ full array, unchanged — history preserved
+    setAdvanceAmount(String(cumulativeTotal)); // ✅ always save the full cumulative sum
     onClose();
   };
 
@@ -79,13 +96,20 @@ const AdvancePopup = ({ onClose, setAdvanceAmount, setAdvanceItems, existingItem
                 <tr><th>Label</th><th>Amount ₹</th><th>Date</th><th></th></tr>
               </thead>
               <tbody>
-                {advances.length === 0 ? (
+                {advancesWithCycle.length === 0 ? (
                   <tr><td colSpan={4} className="text-center text-muted small py-3">No advances added yet</td></tr>
-                ) : advances.map((a, i) => (
-                  <tr key={i}>
-                    <td>{a.label || "-"}</td>
-                    <td>₹ {a.amount}</td>
-                    <td>{a.date ? String(a.date).slice(0, 10) : "-"}</td>
+                ) : advancesWithCycle.map(({ item: a, idx: i, isOld }) => (
+                  <tr key={i} style={isOld ? { background: "#F9FAFB" } : undefined}>
+                    <td style={{ color: isOld ? "#9CA3AF" : "#111827" }}>
+                      {a.label || "-"}
+                      {isOld && (
+                        <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: "#9CA3AF", background: "#F1F5F9", padding: "1px 6px", borderRadius: 10 }}>
+                          Before Rebill
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ color: isOld ? "#9CA3AF" : "#111827" }}>₹ {a.amount}</td>
+                    <td style={{ color: isOld ? "#9CA3AF" : "#111827" }}>{a.date ? String(a.date).slice(0, 10) : "-"}</td>
                     <td>
                       <button className="btn btn-outline-danger btn-sm py-0 px-1" onClick={() => handleRemove(i)}>✕</button>
                     </td>
@@ -94,7 +118,16 @@ const AdvancePopup = ({ onClose, setAdvanceAmount, setAdvanceItems, existingItem
               </tbody>
             </table>
 
-            <div className="text-end fw-bold text-success">Total Advance: ₹ {total}</div>
+            <div className="text-end">
+              <div className="fw-bold text-success">
+                Total {hasRebillSplit ? "(this cycle)" : ""}: ₹ {total}
+              </div>
+              {hasRebillSplit && cumulativeTotal !== total && (
+                <div style={{ fontSize: 11, color: "#6B7280", marginTop: 2 }}>
+                  Lifetime total (all cycles): ₹ {cumulativeTotal}
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="modal-footer py-2">
