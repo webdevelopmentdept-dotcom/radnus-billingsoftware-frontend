@@ -410,6 +410,8 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
       case "taluk":
         return !value || !value.toString().trim() ? "Taluk is required" : "";
 
+      case "serviceRep":
+        return !value || !value.toString().trim() ? "Service Rep is required" : "";
       // ================= IMEI — mandatory unless Dead Phone is checked =================
       case "imei":
         if (isDeadPhone) return "";
@@ -441,7 +443,6 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
       setFormErrors(prev => ({ ...prev, [name]: validateField(name, value) }));
     }
   };
-
   const validateAll = () => {
     const errors = {
       customerName: validateField("customerName", customerName),
@@ -450,10 +451,10 @@ const JobSheetPage = ({ editData = null, isEdit = false }) => {
       district: validateField("district", district),
       taluk: validateField("taluk", taluk),
       imei: validateField("imei", imei),
+      serviceRep: validateField("serviceRep", serviceRep),
     };
     setFormErrors(errors);
-    setTouched({ customerName: true, contact: true, email: true, district: true, taluk: true, imei: true });
-
+    setTouched({ customerName: true, contact: true, email: true, district: true, taluk: true, imei: true, serviceRep: true });
     const errorMessages = Object.values(errors).filter(Boolean);
     if (errorMessages.length > 0) {
       // Modern toast instead of window.alert — shows every field that needs fixing in one card.
@@ -2258,13 +2259,20 @@ const today = new Date().toLocaleDateString("en-CA");
                           </select>
                         </Field>
                       </div>
-
                       <div className="col-md-6">
-                        <Field label="Service Rep">
+                        <Field label="Service Rep" required>
                           <select
-                            className="form-select form-select-sm"
+                            className={`form-select form-select-sm ${touched.serviceRep && formErrors.serviceRep ? "is-invalid" :
+                                touched.serviceRep && !formErrors.serviceRep && serviceRep ? "is-valid" : ""
+                              }`}
                             value={serviceRep}
-                            onChange={e => setServiceRep(e.target.value)}
+                            onChange={e => {
+                              const val = e.target.value;
+                              setServiceRep(val);
+                              if (touched.serviceRep)
+                                setFormErrors(prev => ({ ...prev, serviceRep: validateField("serviceRep", val) }));
+                            }}
+                            onBlur={() => handleBlur("serviceRep", serviceRep)}
                           >
                             <option value="">Service Rep</option>
                             {salesRepList.map((rep, i) => (
@@ -2274,8 +2282,10 @@ const today = new Date().toLocaleDateString("en-CA");
                             ))}
                           </select>
                         </Field>
+                        {touched.serviceRep && formErrors.serviceRep && (
+                          <FieldError>{formErrors.serviceRep}</FieldError>
+                        )}
                       </div>
-
                       <div className="col-md-6">
                         <Field label="Repair Date">
                           <input
