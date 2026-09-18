@@ -13,24 +13,34 @@ const API = import.meta.env.VITE_API_URL;
 const fmt = (n) => n ? "₹" + Number(n).toLocaleString("en-IN") : "₹0";
 
 /* ================= LIFETIME TOTAL HELPERS (FIX) =================
-   🔴 BUG — Service ₹ / Income ₹ columns were reading the raw top-level
-   `service.serviceCharge` / `service.income` fields. Those fields get RESET
-   TO 0 every time a job is rebilled (see backend's /rebill route), and the
-   user re-enters fresh charges for the new cycle only. So once a job had
-   been rebilled even once, this report only ever showed the CURRENT
-   cycle's amount — the pre-rebill amount silently vanished from every
-   total, subtotal, and grand total on this page.
+   🔴 BUG HISTORY — Service ₹ / Income ₹ used to read raw top-level
+   `service.serviceCharge` / `service.income`, which get reset to 0 on
+   rebill, so pre-rebill amounts vanished. That was fixed by summing
+   `revenueEntries` (a per-date delta ledger the backend maintains).
 
-   ✅ FIX — same lifetime-total + dedup approach already used in
-   ValueReport.jsx / ServiceReportPage.jsx / IncomeReportPage.jsx:
-   - revenueEntries (pushed by the backend's updateJobSheet controller on
-     every Income/Service change, across every cycle) is the primary,
-     date-wise ledger — sum it when present.
-   - rebillHistory is only used as a FALLBACK for cycles revenueEntries
-     never tracked (e.g. a job invoiced without ever going through a normal
-     Update first) — added via getUncoveredRebillEntries's cycle-window
-     dedup check, so a cycle already covered by revenueEntries is never
-     double-counted.
+   🔴 NEW BUG (JS-827) — revenueEntries can carry STALE rows. If the user
+   types an amount, saves, then only changes the Income Date (not the
+   amount) and saves again, the OLD date-key's row was never retired (its
+   date-key differs from the new one) — so both rows stayed in the array
+   forever and got double-summed into the lifetime total (₹900 shown
+   instead of the real ₹520, in this bug). The backend has a separate fix
+   for NEW saves going forward, but existing/duplicate rows shouldn't be
+   allowed to inflate what this report shows either way.
+
+   ✅ FIX — stop using revenueEntries for the LIFETIME (no date-range)
+   total entirely. Use instead:
+   - job.service.serviceCharge / job.service.income → the CURRENT open
+     cycle's amount. This top-level field is always the latest-correct
+     value regardless of how many times it was edited — it's never a sum
+     of deltas, so stale rows can't inflate it.
+   - job.rebillHistory → the authoritative snapshot of every PAST cycle's
+     amount (captured once, at the moment of rebill — see backend's
+     /rebill route). This is real rebill history, not same-cycle date
+     corrections, so it's safe to sum directly.
+   revenueEntries is still used ONLY when a Transaction Date range is
+   active, to attribute an amount to a specific sub-period — that's a
+   different, narrower use case from the lifetime total.
+
    Spare ₹ is NOT touched — spareCharge is already cumulative by design
    (spareItems array persists across every rebill). Advance ₹ is also not
    reset by rebill, so it's already lifetime-accurate as-is.
@@ -38,7 +48,14 @@ const fmt = (n) => n ? "₹" + Number(n).toLocaleString("en-IN") : "₹0";
    idea as Spare — othersItems isn't cleared by rebill either, only the
    top-level othersAmount summary field is. */
 
-const toISODate = (d) => (d ? new Date(d).toISOString().slice(0, 10) : "");
+const toISODate = (d) => {
+  if (!d) return "";
+  const date = new Date(d);
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+};
 const inRange  = (isoDate, from, to) => {
   if (!isoDate) return false;
   if (from && isoDate < from) return false;
@@ -77,58 +94,63 @@ const getUncoveredRebillEntries = (job) => {
 };
 
 /* ================= RANGE-AWARE TOTALS (FIX — Transaction Date bug) =================
-   🔴 BUG the user hit — with "Transaction Date" filter set to e.g. 01–10 Sept,
-   a job like JS-500 (Thomas) that has an Aug 12 entry (₹4,000) AND a Sept 03
-   entry (₹8,000) matched the filter correctly (it HAS a transaction inside
-   the range), but the row then showed the job's FULL lifetime total ₹12,000
-   — the Aug entry leaking in even though it's outside the selected range.
-
-   ✅ FIX — every total helper below now takes an optional `range` ({from,to}).
-   - range === null (default) → unchanged old behavior: full lifetime total,
-     used everywhere EXCEPT when the Transaction Date filter is actively
-     restricting a period (Received/Delivery/Created filters still show each
-     job's full lifetime value — only Transaction Date restricts the amount
-     itself, since that's the one where "this job had a transaction in this
-     exact window" is the point).
-   - range = {from, to} → only entries whose OWN date falls inside the range
-     are summed (same as ValueReport's per-row Transaction Date logic, just
-     aggregated per job instead of per row). A job with no dated sub-entries
-     at all can't be attributed to a specific period, so it contributes 0
-     when a range is active (instead of leaking its dateless top-level
-     amount into every period). */
+   These take an optional `range` ({from,to}).
+   - range === null (default / "lifetime" view) → current-cycle top-level field +
+     every rebillHistory cycle summed directly. See the big comment above for why.
+   - range = {from, to} (Transaction Date filter active) → only entries whose OWN
+     date falls inside the range are summed, using revenueEntries (dated deltas)
+     for the current cycle and rebillHistory (filtered by its own date) for past
+     cycles — same as before, unaffected by the lifetime-total fix above. */
 
 const getServiceTotal = (job, range = null) => {
-  const allEntries = job.service?.revenueEntries || [];
-  const entries = range
-    ? allEntries.filter((e) => inRange(toISODate(e.date), range.from, range.to))
-    : allEntries;
-  const fromEntries = entries.reduce((s, e) => s + Number(e.service || 0), 0);
+  if (range) {
+    const allEntries = job.service?.revenueEntries || [];
+    const entries = allEntries.filter((e) => inRange(toISODate(e.date), range.from, range.to));
+    const fromEntries = entries.reduce((s, e) => s + Number(e.service || 0), 0);
 
-  const allRebills = getUncoveredRebillEntries(job);
-  const rebills = range
-    ? allRebills.filter((rb) => inRange(toISODate(rb.incomeDate || rb.rebilledAt), range.from, range.to))
-    : allRebills;
-  const fromRebills = rebills.reduce((s, rb) => s + Number(rb.serviceCharge || 0), 0);
+    const allRebills = getUncoveredRebillEntries(job);
+    const rebills = allRebills.filter((rb) => inRange(toISODate(rb.incomeDate || rb.rebilledAt), range.from, range.to));
+    const fromRebills = rebills.reduce((s, rb) => s + Number(rb.serviceCharge || 0), 0);
 
-  if (allEntries.length > 0) return fromEntries + fromRebills;
-  return range ? fromRebills : Number(job.service?.serviceCharge || 0) + fromRebills;
+    if (allEntries.length > 0) return fromEntries + fromRebills;
+
+    // no revenueEntries at all — attribute current Service Charge to whichever
+    // date it can be pinned to, so it doesn't vanish from a range filter.
+    const fallbackDate = job.service?.incomeDate || job.service?.repairDate || job.createdAt;
+    const d = fallbackDate ? toISODate(fallbackDate) : "";
+    const fallbackAmt = inRange(d, range.from, range.to) ? Number(job.service?.serviceCharge || 0) : 0;
+    return fallbackAmt + fromRebills;
+  }
+
+  // ✅ Lifetime total — current cycle's top-level field (always correct, never a
+  // sum-of-deltas) + every REAL past rebill cycle from rebillHistory.
+  const rebillArr = job.rebillHistory || [];
+  const fromRebillHistory = rebillArr.reduce((s, rb) => s + Number(rb.serviceCharge || 0), 0);
+  return Number(job.service?.serviceCharge || 0) + fromRebillHistory;
 };
 
 const getIncomeTotal = (job, range = null) => {
-  const allEntries = job.service?.revenueEntries || [];
-  const entries = range
-    ? allEntries.filter((e) => inRange(toISODate(e.date), range.from, range.to))
-    : allEntries;
-  const fromEntries = entries.reduce((s, e) => s + Number(e.income || 0), 0);
+  if (range) {
+    const allEntries = job.service?.revenueEntries || [];
+    const entries = allEntries.filter((e) => inRange(toISODate(e.date), range.from, range.to));
+    const fromEntries = entries.reduce((s, e) => s + Number(e.income || 0), 0);
 
-  const allRebills = getUncoveredRebillEntries(job);
-  const rebills = range
-    ? allRebills.filter((rb) => inRange(toISODate(rb.incomeDate || rb.rebilledAt), range.from, range.to))
-    : allRebills;
-  const fromRebills = rebills.reduce((s, rb) => s + Number(rb.income || 0), 0);
+    const allRebills = getUncoveredRebillEntries(job);
+    const rebills = allRebills.filter((rb) => inRange(toISODate(rb.incomeDate || rb.rebilledAt), range.from, range.to));
+    const fromRebills = rebills.reduce((s, rb) => s + Number(rb.income || 0), 0);
 
-  if (allEntries.length > 0) return fromEntries + fromRebills;
-  return range ? fromRebills : Number(job.service?.income || 0) + fromRebills;
+    if (allEntries.length > 0) return fromEntries + fromRebills;
+
+    const fallbackDate = job.service?.incomeDate || job.service?.repairDate || job.createdAt;
+    const d = fallbackDate ? toISODate(fallbackDate) : "";
+    const fallbackAmt = inRange(d, range.from, range.to) ? Number(job.service?.income || 0) : 0;
+    return fallbackAmt + fromRebills;
+  }
+
+  // ✅ Lifetime total — same idea as getServiceTotal above.
+  const rebillArr = job.rebillHistory || [];
+  const fromRebillHistory = rebillArr.reduce((s, rb) => s + Number(rb.income || 0), 0);
+  return Number(job.service?.income || 0) + fromRebillHistory;
 };
 
 const getOthersTotal = (job, range = null) => {
@@ -138,10 +160,10 @@ const getOthersTotal = (job, range = null) => {
   return range ? 0 : Number(job.service?.othersAmount || 0);
 };
 
-// ✅ NEW — Spare ₹ was always read from the raw cumulative service.spareCharge
-// field, which has no date of its own. When Transaction Date restricts to a
-// period, spare has to come from the dated spareItems list instead so it
-// only counts spares actually added in that window.
+// Spare ₹ was always read from the raw cumulative service.spareCharge field,
+// which has no date of its own. When Transaction Date restricts to a period,
+// spare has to come from the dated spareItems list instead so it only counts
+// spares actually added in that window.
 const getSpareTotal = (job, range = null) => {
   const items = job.spareItems || [];
   const filtered = range ? items.filter((si) => inRange(toISODate(si.date), range.from, range.to)) : items;
@@ -149,9 +171,9 @@ const getSpareTotal = (job, range = null) => {
   return range ? 0 : Number(job.service?.spareCharge || 0);
 };
 
-// ✅ NEW — same idea for Advance ₹: use dated advanceItems when a range is
-// active, falling back to the single advanceDate/advanceAmount pair only
-// when there's no advanceItems list.
+// Same idea for Advance ₹: use dated advanceItems when a range is active,
+// falling back to the single advanceDate/advanceAmount pair only when there's
+// no advanceItems list.
 const getAdvanceTotal = (job, range = null) => {
   const items = job.service?.advanceItems || [];
   if (items.length > 0) {
@@ -165,31 +187,29 @@ const getAdvanceTotal = (job, range = null) => {
   return Number(job.service?.advanceAmount || 0);
 };
 
-/* ================= PER-DATE BREAKDOWN (rebill detail, NEW) =================
-   Returns [{ label: "02 Sep", amount: 1200 }, ...] combining revenueEntries
-   dates with any uncovered rebillHistory cycle's date, for a given field
-   ("service" | "income"). Only returned when there's genuinely more than
-   one date to show (single-cycle jobs stay pill-free — no visual noise),
-   so a rebilled job's "already billed vs new cycle" split becomes visible
-   right under its amount. */
+/* ================= PER-DATE BREAKDOWN (rebill detail, FIX) =================
+   🔴 OLD BEHAVIOR — pulled dates from revenueEntries, which meant a job that
+   was never actually rebilled but had its Income Date CORRECTED once (same
+   cycle, two date-key rows in revenueEntries) showed a fake two-line
+   "breakdown" — misleadingly implying it had been rebilled when it hadn't.
+
+   ✅ FIX — breakdown now comes ONLY from job.rebillHistory (a real, distinct
+   rebill cycle) plus the current open cycle's own amount. A job with zero
+   rebillHistory entries never shows a breakdown — it's just one number, as
+   it should be for a job that was billed once and never reopened. */
 const getBreakdown = (job, field, range = null) => {
-  const allEntries = job.service?.revenueEntries || [];
-  const entries = range
-    ? allEntries.filter((e) => inRange(toISODate(e.date), range.from, range.to))
-    : allEntries;
-  const list = entries
-    .filter((e) => Number(e[field] || 0) > 0)
-    .map((e) => ({
-      label: new Date(e.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }),
-      amount: Number(e[field]),
-    }));
+  const rebillArr = job.rebillHistory || [];
+  if (rebillArr.length === 0) return [];
 
   const rebillField = field === "service" ? "serviceCharge" : "income";
-  const allRebills = getUncoveredRebillEntries(job);
-  const rebills = range
-    ? allRebills.filter((rb) => inRange(toISODate(rb.incomeDate || rb.rebilledAt), range.from, range.to))
-    : allRebills;
-  rebills.forEach((rb) => {
+  const currentField = field === "service" ? "serviceCharge" : "income";
+
+  const filteredRebills = range
+    ? rebillArr.filter((rb) => inRange(toISODate(rb.incomeDate || rb.rebilledAt), range.from, range.to))
+    : rebillArr;
+
+  const list = [];
+  filteredRebills.forEach((rb) => {
     const amt = Number(rb[rebillField] || 0);
     if (amt <= 0) return;
     const d = rb.incomeDate || rb.rebilledAt;
@@ -200,6 +220,22 @@ const getBreakdown = (job, field, range = null) => {
       amount: amt,
     });
   });
+
+  // current open cycle's amount, shown alongside past rebills so the full
+  // picture (all cycles) is visible under one job's total.
+  const currentAmt = Number(job.service?.[currentField] || 0);
+  const currentDate = job.service?.incomeDate || job.service?.repairDate || job.createdAt;
+  const inCurrentRange = range
+    ? inRange(currentDate ? toISODate(currentDate) : "", range.from, range.to)
+    : true;
+  if (currentAmt > 0 && inCurrentRange) {
+    list.push({
+      label: currentDate
+        ? new Date(currentDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })
+        : "Current",
+      amount: currentAmt,
+    });
+  }
 
   return list.length > 1 ? list : [];
 };
@@ -224,7 +260,7 @@ const BreakdownPills = ({ items, color }) => {
   );
 };
 
-/* ================= DATE TYPE FILTER (NEW — same idea as ValueReport.jsx) =================
+/* ================= DATE TYPE FILTER (same idea as ValueReport.jsx) =================
    Unlike ValueReport (one row per transaction), this page is one row per JOB —
    JobRow shows a job's lifetime totals in a single row. So a date-type filter
    here has to decide, per JOB, whether it belongs in the range:
@@ -234,13 +270,13 @@ const BreakdownPills = ({ items, color }) => {
      "delivery"              → job.service?.deliveryDate
      "transaction"           → the job matches if ANY of its dated entries
                                (revenueEntries / spareItems / othersItems /
-                               advanceItems / an uncovered rebillHistory
-                               cycle) falls inside the range. This is the one
-                               to pick for month-wise revenue-style checks
-                               that must catch a rebilled job even if its
-                               original received/created date is outside the
-                               month — same reasoning as ValueReport's
-                               Transaction Date option.
+                               advanceItems / a rebillHistory cycle) falls
+                               inside the range. This is the one to pick for
+                               month-wise revenue-style checks that must catch
+                               a rebilled job even if its original
+                               received/created date is outside the month —
+                               same reasoning as ValueReport's Transaction
+                               Date option.
 
    Filtering is done CLIENT-SIDE against the full fetched dataset (rawData),
    so switching the Date Type dropdown re-filters instantly without another
@@ -262,15 +298,16 @@ const jobMatchesDateFilter = (job, type, from, to) => {
     (job.spareItems || []).forEach((si) => si.date && dates.push(toISODate(si.date)));
     (job.service?.othersItems || []).forEach((oi) => oi.date && dates.push(toISODate(oi.date)));
     (job.service?.advanceItems || []).forEach((a) => a.date && dates.push(toISODate(a.date)));
-    getUncoveredRebillEntries(job).forEach((rb) => {
+    (job.rebillHistory || []).forEach((rb) => {
       const d = rb.incomeDate || rb.rebilledAt;
       if (d) dates.push(toISODate(d));
     });
-    // job with no dated sub-entries at all (no revenueEntries/spare/others/advance/
-    // rebill rows) — fall back to createdAt so it doesn't just vanish from every filter
+    // job with no dated sub-entries at all — fall back to incomeDate/repairDate/
+    // createdAt so it doesn't just vanish from every filter
     if (dates.length === 0) {
-      const fallback = toISODate(job.createdAt);
-      if (fallback) dates.push(fallback);
+      const fallback = job.service?.incomeDate || job.service?.repairDate || job.createdAt;
+      const fd = fallback ? toISODate(fallback) : "";
+      if (fd) dates.push(fd);
     }
     return dates.some((d) => d && (!from || d >= from) && (!to || d <= to));
   }
@@ -333,12 +370,9 @@ const SummaryCard = ({ label, value, accent, icon }) => (
   </div>
 );
 
-// ✅ NEW — Adv. Date must agree with whatever Advance ₹ is showing. When a
-// Transaction Date range is active and Advance ₹ is restricted to just the
-// in-range advance(s), the date shown here must be an in-range advance date
-// too — otherwise you get exactly the bug reported: Advance ₹ shows "—" (0,
-// correctly excluded) but Adv. Date still shows an August date that belongs
-// to an advance outside the selected Sept window, which looks contradictory.
+// Adv. Date must agree with whatever Advance ₹ is showing. When a Transaction
+// Date range is active and Advance ₹ is restricted to just the in-range
+// advance(s), the date shown here must be an in-range advance date too.
 const getAdvanceDateDisplay = (job, range = null) => {
   const items = job.service?.advanceItems || [];
   if (items.length > 0) {
@@ -363,12 +397,6 @@ const JOB_HEADERS = [
 ];
 
 const JobRow = ({ job, i, rep, range = null }) => {
-  // ✅ FIX — Service ₹ / Income ₹ / Others ₹ / Spare ₹ / Advance ₹ use lifetime
-  // totals (rebill-safe) by default. When `range` is passed (Transaction Date
-  // filter active with a from/to set), every amount is restricted to just the
-  // entries whose OWN date falls inside that range — this is what stops a job
-  // like JS-500 (Aug ₹4,000 + Sept ₹8,000) from showing its full ₹12,000 when
-  // you've filtered for Sept only; it now shows just the ₹8,000 Sept portion.
   const sc  = getServiceTotal(job, range);
   const sp  = getSpareTotal(job, range);
   const inc = getIncomeTotal(job, range);
@@ -409,8 +437,6 @@ const JobRow = ({ job, i, rep, range = null }) => {
       <td style={{ padding: "8px 10px", color: "#0d6efd", fontWeight: 500 }}>{adv ? fmt(adv) : "—"}</td>
       <td style={{ padding: "8px 10px", color: "#0369a1", fontSize: 11, whiteSpace: "nowrap" }}>
         {(() => {
-          // ✅ FIX — respects `range` so this date can't disagree with the
-          // (possibly range-restricted) Advance ₹ amount shown beside it
           const advDate = getAdvanceDateDisplay(job, range);
           return advDate
             ? new Date(advDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" })
@@ -445,13 +471,6 @@ const TableHead = () => (
   </thead>
 );
 
-// ---------------------------------------------------------------------
-// ✅ NEW — reusable horizontal-scroll control.
-// Sits below the search bar. Clicking left/right scrolls EVERY table
-// on the page (every element carrying the "scrollable-table" class)
-// together, so it works whether there's one rep's table or many
-// stacked underneath each other.
-// ---------------------------------------------------------------------
 const ScrollControls = () => {
   const scrollTables = (amount) => {
     document.querySelectorAll(".scrollable-table").forEach((el) => {
@@ -488,9 +507,6 @@ const ServiceRepReportPage = () => {
   const currentDisplayName = currentUser?.name || currentUser?.username || "";
   const currentName        = currentUsername || currentDisplayName;
 
-  // ✅ raw = everything fetched from the backend for the current rep-name search
-  //    (NOT date-filtered server-side anymore — date filtering happens client-side
-  //    below via jobMatchesDateFilter, so switching Date Type / dates is instant).
   const [rawData,    setRawData]    = useState({});
   const [loading,    setLoading]    = useState(false);
   const [searchText, setSearchText] = useState("");
@@ -499,12 +515,9 @@ const ServiceRepReportPage = () => {
   const [repFilter,  setRepFilter]  = useState("");
   const [view,       setView]       = useState("table");
 
-  // ✅ NEW — Job No / Customer Name / Phone Number search (client-side, works
-  // on top of whatever the rep-name search + date filter already narrowed down to)
   const [jobSearchText, setJobSearchText] = useState("");
 
-  // ✅ NEW — Date Type selector, same 4 options as ValueReport.jsx
-  const [dateFilterType, setDateFilterType] = useState("received"); // "received" | "delivery" | "created" | "transaction"
+  const [dateFilterType, setDateFilterType] = useState("received");
 
   useEffect(() => {
     if (currentRole !== "admin") {
@@ -514,8 +527,6 @@ const ServiceRepReportPage = () => {
     }
   }, []);
 
-  // ✅ date params no longer sent to the backend — only the rep-name search
-  // goes server-side, all date filtering happens client-side below.
   const fetchData = async (search = "") => {
     try {
       setLoading(true);
@@ -534,9 +545,6 @@ const ServiceRepReportPage = () => {
   const handleSearch = () => fetchData(searchText);
   const handleClear  = () => { setSearchText(""); setFromDate(""); setToDate(""); setDateFilterType("received"); setJobSearchText(""); fetchData(); };
 
-  // ✅ NEW — client-side date-type filter + Job No/Name/Phone text filter, both
-  // applied on top of rawData. Recomputes instantly on every keystroke / date
-  // change / dropdown change, no extra API call needed.
   const data = useMemo(() => {
     let out = rawData;
 
@@ -568,18 +576,11 @@ const ServiceRepReportPage = () => {
     return out;
   }, [rawData, dateFilterType, fromDate, toDate, jobSearchText]);
 
-  // ✅ human label for whichever date type is active, shown next to the dropdown
   const dateTypeLabel = dateFilterType === "delivery" ? "Delivery Date"
     : dateFilterType === "transaction" ? "Transaction Date"
     : dateFilterType === "created" ? "Created Date"
     : "Received Date";
 
-  // ✅ FIX (the Transaction Date amount bug) — only Transaction Date restricts
-  // the AMOUNTS themselves to the selected window; Received/Delivery/Created
-  // still show each job's full lifetime value (they just decide which date
-  // groups the job under). activeRange = null everywhere else, so
-  // getServiceTotal/getIncomeTotal/etc fall back to their old full-lifetime
-  // behavior unchanged.
   const activeRange = (dateFilterType === "transaction" && (fromDate || toDate))
     ? { from: fromDate || "", to: toDate || "" }
     : null;
@@ -589,8 +590,6 @@ const ServiceRepReportPage = () => {
   const totalJobs    = allJobs.length;
   const today        = new Date().toLocaleDateString();
   const todayJobs    = allJobs.filter(j => new Date(j.createdAt).toLocaleDateString() === today).length;
-  // ✅ FIX — lifetime totals (rebill-safe) by default, range-restricted when
-  // Transaction Date filter is active
   const totalService = allJobs.reduce((s, j) => s + getServiceTotal(j, activeRange), 0);
   const totalSpare   = allJobs.reduce((s, j) => s + getSpareTotal(j, activeRange), 0);
   const totalIncome  = allJobs.reduce((s, j) => s + getIncomeTotal(j, activeRange), 0);
@@ -602,8 +601,6 @@ const ServiceRepReportPage = () => {
 
   const repSummaries = repList.map((rep) => {
     const jobs = data[rep];
-    // ✅ FIX — lifetime totals (rebill-safe) by default, range-restricted when
-    // Transaction Date filter is active
     const sc  = jobs.reduce((s, j) => s + getServiceTotal(j, activeRange), 0);
     const sp  = jobs.reduce((s, j) => s + getSpareTotal(j, activeRange), 0);
     const inc = jobs.reduce((s, j) => s + getIncomeTotal(j, activeRange), 0);
@@ -626,8 +623,6 @@ const ServiceRepReportPage = () => {
     const rows = [];
     repList.forEach(rep => {
       data[rep].forEach((job, i) => {
-        // ✅ FIX — lifetime totals (rebill-safe) by default, range-restricted
-        // when Transaction Date filter is active, in the Excel export too
         const sc  = getServiceTotal(job, activeRange);
         const sp  = getSpareTotal(job, activeRange);
         const inc = getIncomeTotal(job, activeRange);
@@ -669,10 +664,6 @@ const ServiceRepReportPage = () => {
   return (
     <div style={{ maxWidth: 1400, margin: "0 auto", padding: "24px 16px", fontFamily: "system-ui, sans-serif" }}>
 
-      {/* ================= CUSTOM SCROLLBAR (matches AllReportPage) =================
-          Applies to every ".scrollable-table" wrapper on this page — the per-rep
-          tables AND the dashboard tables — so all horizontal scrollbars here use
-          the same high-contrast blue thumb instead of the flat default grey. */}
       <style>{`
         .scrollable-table::-webkit-scrollbar {
           height: 12px;
@@ -727,7 +718,6 @@ const ServiceRepReportPage = () => {
         <SummaryCard label="Google Review" value={totalGoogleYes}     accent="#d97706" icon={<FaStar size={11} color="#d97706" />} />
       </div>
 
-      {/* ✅ NEW — Date Type selector + Job No/Name/Phone search, shared by both admin & non-admin filter rows below */}
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
         <label style={{ fontSize: 11, color: "#6c757d", fontWeight: 600 }}>DATE TYPE</label>
         <select
@@ -818,7 +808,6 @@ const ServiceRepReportPage = () => {
         </div>
       )}
 
-      {/* ✅ NEW — scroll control, right below the search/filter bar */}
       <ScrollControls />
 
       {loading && <div className="text-center py-4 text-muted">Loading...</div>}
@@ -826,8 +815,6 @@ const ServiceRepReportPage = () => {
 
       {!loading && view === "table" && repList.map((rep, idx) => {
         const jobs = data[rep];
-        // ✅ FIX — lifetime totals (rebill-safe) by default, range-restricted
-        // when Transaction Date filter is active, for each rep's subtotal chips
         const uSC  = jobs.reduce((s, j) => s + getServiceTotal(j, activeRange), 0);
         const uSP  = jobs.reduce((s, j) => s + getSpareTotal(j, activeRange), 0);
         const uINC = jobs.reduce((s, j) => s + getIncomeTotal(j, activeRange), 0);
@@ -865,7 +852,6 @@ const ServiceRepReportPage = () => {
               </div>
             </div>
 
-            {/* ✅ className added so ScrollControls buttons can find & scroll this */}
             <div className="scrollable-table" style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <TableHead />

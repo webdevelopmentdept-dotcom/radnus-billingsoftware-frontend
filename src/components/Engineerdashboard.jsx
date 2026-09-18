@@ -5,17 +5,16 @@ import {
   Wrench, LogOut, Search, RefreshCw, ChevronUp, ChevronDown,
   Trash2, Plus, ArrowLeftRight, Phone, Smartphone, AlertCircle,
   FileText, Calendar, CheckCircle2, ClipboardList, MessageSquare,
-  Inbox, PartyPopper, Undo2, Rocket, Loader2, User
+  Inbox, Undo2, Rocket, Loader2, User
 } from "lucide-react";
 
 const STATUS_STEPS = [
-  { key: "Received",          label: "Received",          icon: Inbox,        color: "#3b82f6", bg: "#dbeafe" },
-  { key: "Diagnosing",        label: "Diagnosing",        icon: Search,       color: "#f59e0b", bg: "#fef3c7" },
-  { key: "Repairing",         label: "Repairing",         icon: Wrench,       color: "#8b5cf6", bg: "#ede9fe" },
-  { key: "Repaired",          label: "Repaired",          icon: CheckCircle2, color: "#10b981", bg: "#d1fae5" },
-  { key: "Delivered NR/NA",   label: "Delivered NR/NA",   icon: PartyPopper,  color: "#059669", bg: "#a7f3d0" },
-  { key: "Return",            label: "Return",            icon: Undo2,        color: "#ef4444", bg: "#fee2e2" },
-  { key: "Delivered",         label: "Delivered",         icon: Rocket,       color: "#059669", bg: "#a7f3d0" },
+  { key: "Received",   label: "Received",   icon: Inbox,        color: "#3b82f6", bg: "#dbeafe" },
+  { key: "Diagnosing", label: "Diagnosing", icon: Search,       color: "#f59e0b", bg: "#fef3c7" },
+  { key: "Repairing",  label: "Repairing",  icon: Wrench,       color: "#8b5cf6", bg: "#ede9fe" },
+  { key: "Ready",      label: "Ready",      icon: CheckCircle2, color: "#10b981", bg: "#d1fae5" },
+  { key: "Return",     label: "Return",     icon: Undo2,        color: "#ef4444", bg: "#fee2e2" },
+  { key: "Delivered",  label: "Delivered",  icon: Rocket,       color: "#059669", bg: "#a7f3d0" },
 ];
 
 const getStaleDays = (job) => {
@@ -79,11 +78,11 @@ const EngineerDashboard = () => {
     axios.get(`${API}/api/engineers`).then(res => setEngineerList(res.data)).catch(console.error);
   }, []);
 
- const handleLogout = () => {
-  sessionStorage.removeItem("token");
-  sessionStorage.removeItem("user");
-  navigate("/");
-};
+  const handleLogout = () => {
+    sessionStorage.removeItem("token");
+    sessionStorage.removeItem("user");
+    navigate("/");
+  };
 
   const fetchJobs = async () => {
     setLoading(true);
@@ -135,34 +134,34 @@ const EngineerDashboard = () => {
     } catch { alert("Delete failed"); }
   };
 
-const handleTransfer = async () => {
-  if (!transferTo) return alert("Please Select the Engineer !");
-  if (transferTo === engineerName) return alert("You can't transfer it to yourself!");
+  const handleTransfer = async () => {
+    if (!transferTo) return alert("Please Select the Engineer !");
+    if (transferTo === engineerName) return alert("You can't transfer it to yourself!");
 
-  setTransferLoading(true);
-  
-  try {
-    await axios.patch(`${API}/api/jobsheets/${transferJobId}/transfer`, {
-      from: engineerName,
-      to: transferTo,
-      note: transferNote
-    });
-    setJobs(prev => prev.filter(j => j._id !== transferJobId));
-    setTransferJobId(null);
-    setTransferTo("");
-    setTransferNote("");
+    setTransferLoading(true);
 
-    alert(
-      transferTo === "Reception"
-        ? `Job returned to Reception!`
-        : `Job transferred to ${transferTo}`
-    );
-  } catch (err) {
-    alert(err.response?.data?.message || "Transfer failed");
-  } finally {
-    setTransferLoading(false);
-  }
-};
+    try {
+      await axios.patch(`${API}/api/jobsheets/${transferJobId}/transfer`, {
+        from: engineerName,
+        to: transferTo,
+        note: transferNote
+      });
+      setJobs(prev => prev.filter(j => j._id !== transferJobId));
+      setTransferJobId(null);
+      setTransferTo("");
+      setTransferNote("");
+
+      alert(
+        transferTo === "Reception"
+          ? `Job returned to Reception!`
+          : `Job transferred to ${transferTo}`
+      );
+    } catch (err) {
+      alert(err.response?.data?.message || "Transfer failed");
+    } finally {
+      setTransferLoading(false);
+    }
+  };
 
   const filtered = jobs.filter(j => {
     const q = search.toLowerCase();
@@ -199,26 +198,26 @@ const handleTransfer = async () => {
             </div>
 
             <label style={{ fontSize: "12px", color: "#64748b", fontWeight: 600 }}>Transfer to:</label>
-          <select value={transferTo} onChange={e => setTransferTo(e.target.value)}
-  style={{ width: "100%", border: "1px solid #cbd5e1", borderRadius: "8px", padding: "8px 10px", fontSize: "13px", marginTop: "4px", marginBottom: "12px" }}>
-  <option value="">-- Select Target --</option>
-  <option value="Reception">Reception (Free up capacity)</option>
-  <optgroup label="Engineers">
-  {otherEngineers.map((eng, i) => (
-    <option key={i} value={eng}>{eng}</option>
-  ))}
-</optgroup>
-</select>
-          
+            <select value={transferTo} onChange={e => setTransferTo(e.target.value)}
+              style={{ width: "100%", border: "1px solid #cbd5e1", borderRadius: "8px", padding: "8px 10px", fontSize: "13px", marginTop: "4px", marginBottom: "12px" }}>
+              <option value="">-- Select Target --</option>
+              <option value="Reception">Reception (Free up capacity)</option>
+              <optgroup label="Engineers">
+                {otherEngineers.map((eng, i) => (
+                  <option key={i} value={eng}>{eng}</option>
+                ))}
+              </optgroup>
+            </select>
+
             <label style={{ fontSize: "12px", color: "#64748b", fontWeight: 600 }}>Note (optional):</label>
             <textarea rows={2} placeholder="e.g. Step 2 done, IC check பண்ணுங்க" value={transferNote} onChange={e => setTransferNote(e.target.value)}
               style={{ width: "100%", border: "1px solid #cbd5e1", borderRadius: "8px", padding: "8px 10px", fontSize: "13px", marginTop: "4px", marginBottom: "16px", outline: "none", resize: "none", boxSizing: "border-box" }} />
 
             <div style={{ display: "flex", gap: "10px" }}>
-        <button onClick={handleTransfer} disabled={transferLoading}
-  style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "#f59e0b", color: "#fff", border: "none", borderRadius: "8px", padding: "10px", fontWeight: 700, cursor: "pointer", fontSize: "13px" }}>
-  {transferLoading ? <><Loader2 size={14} className="spin" /> Transferring...</> : <><ArrowLeftRight size={14} /> Transfer</>}
-</button>
+              <button onClick={handleTransfer} disabled={transferLoading}
+                style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "#f59e0b", color: "#fff", border: "none", borderRadius: "8px", padding: "10px", fontWeight: 700, cursor: "pointer", fontSize: "13px" }}>
+                {transferLoading ? <><Loader2 size={14} className="spin" /> Transferring...</> : <><ArrowLeftRight size={14} /> Transfer</>}
+              </button>
               <button onClick={() => { setTransferJobId(null); setTransferTo(""); setTransferNote(""); }}
                 style={{ flex: 1, background: "#f1f5f9", color: "#475569", border: "1px solid #cbd5e1", borderRadius: "8px", padding: "10px", fontWeight: 600, cursor: "pointer", fontSize: "13px" }}>
                 Cancel
@@ -362,7 +361,17 @@ const handleTransfer = async () => {
                           const Icon = s.icon;
                           return (
                             <button key={s.key} onClick={() => !isActive && handleStatusUpdate(job._id, s.key)} disabled={isActive || isUpdating}
-                              style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", borderRadius: "8px", fontSize: "11px", fontWeight: 600, cursor: isActive ? "default" : "pointer", border: `1px solid ${s.color}`, background: isActive ? s.bg : "#fff", color: isActive ? s.color : "#64748b", opacity: isUpdating ? 0.6 : 1 }}>
+                              style={{
+                                display: "flex", alignItems: "center", gap: 5, padding: "5px 10px",
+                                borderRadius: "8px", fontSize: "11px", fontWeight: 700,
+                                cursor: isActive ? "default" : "pointer",
+                                border: `2px solid ${s.color}`,
+                                background: isActive ? s.color : "#fff",
+                                color: isActive ? "#fff" : s.color,
+                                boxShadow: isActive ? `0 0 0 3px ${s.bg}` : "none",
+                                opacity: isUpdating ? 0.6 : 1,
+                                transition: "all 0.15s"
+                              }}>
                               {isUpdating && isActive ? <Loader2 size={12} className="spin" /> : <Icon size={12} />} {s.label}
                             </button>
                           );
