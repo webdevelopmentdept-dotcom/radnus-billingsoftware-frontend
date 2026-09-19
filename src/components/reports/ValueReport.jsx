@@ -1,63 +1,124 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import axios from "axios";
 import * as XLSX from "xlsx";
 import {
-  FileText, Wallet, Wrench, Cog, IndianRupee,
-  Package, HandCoins, Scale, Printer, Download,
-  Calendar, RotateCcw,
+  BarChart3, Search, User, Users, CalendarDays, RotateCcw, Printer,
+  FileSpreadsheet, FileText, Wallet, Wrench, Cog, IndianRupee, Package,
+  HandCoins, Scale, Loader2, Inbox, Phone, Filter, Hash, Tag, CheckCircle2, Clock,
 } from "lucide-react";
+
+const API = import.meta.env.VITE_API_URL;
+
+/* ================= HELPERS ================= */
+const todayStr = () => new Date().toLocaleDateString("en-CA");
+const fmtDMY = (v) =>
+  /^\d{4}-\d{2}-\d{2}$/.test(v || "") ? v.split("-").reverse().join("-") : v || "-";
+const money = (n) =>
+  `₹${Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/* Rep name-ku fixed color — same rep-ku eppovum same color */
+const REP_COLORS = [
+  { bg: "#dbeafe", fg: "#1d4ed8" },
+  { bg: "#d1fae5", fg: "#047857" },
+  { bg: "#ede9fe", fg: "#6d28d9" },
+  { bg: "#fef3c7", fg: "#b45309" },
+  { bg: "#ffe4e6", fg: "#be123c" },
+  { bg: "#cffafe", fg: "#0e7490" },
+  { bg: "#fae8ff", fg: "#a21caf" },
+  { bg: "#ecfccb", fg: "#4d7c0f" },
+];
+const repColor = (name = "") => {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return REP_COLORS[h % REP_COLORS.length];
+};
+
+const TONES = {
+  blue:   { bg: "#dbeafe", fg: "#2563eb" },
+  green:  { bg: "#d1fae5", fg: "#059669" },
+  amber:  { bg: "#fef3c7", fg: "#d97706" },
+  violet: { bg: "#ede9fe", fg: "#7c3aed" },
+  cyan:   { bg: "#cffafe", fg: "#0e7490" },
+  orange: { bg: "#ffedd5", fg: "#ea580c" },
+  rose:   { bg: "#ffe4e6", fg: "#e11d48" },
+};
+
+/* ================= SMALL UI PARTS ================= */
+const Field = ({ label, icon: Icon, className = "", children }) => (
+  <div className={`val-field ${className}`}>
+    <div className="val-label">
+      {Icon && <Icon size={12} />}
+      <span>{label}</span>
+    </div>
+    {children}
+  </div>
+);
+
+const StatCard = ({ icon: Icon, label, value, tone }) => (
+  <div className="val-stat">
+    <div className="val-stat-icon" style={{ background: tone.bg, color: tone.fg }}>
+      <Icon size={20} />
+    </div>
+    <div style={{ minWidth: 0 }}>
+      <div className="val-stat-label">{label}</div>
+      <div className="val-stat-value">{value}</div>
+    </div>
+  </div>
+);
+
+const Th = ({ icon: Icon, className = "", children }) => (
+  <th className={className}>
+    <span className="val-th">{Icon && <Icon size={13} />}{children}</span>
+  </th>
+);
+
+/* amount cell + "Already ₹xxx" jump link */
+const AmountCell = ({ value, prior, onJump, className = "" }) => (
+  <td className={`r ${className}`}>
+    {value > 0 ? money(value) : <span className="val-dash">-</span>}
+    {prior > 0 && (
+      <div className="val-already" onClick={onJump}>Already ₹{prior}</div>
+    )}
+  </td>
+);
+
+/* ================= PAGE ================= */
 const ValueReport = () => {
-  const today = new Date().toISOString().split("T")[0];
+  const today = todayStr();
   const [fromDate, setFromDate] = useState(today);
   const [toDate, setToDate] = useState(today);
-  const [searchText, setSearchText] = useState("");   // ✅ NEW — Job No / Name search
+  const [searchText, setSearchText] = useState("");   // Job No / Name / Contact / Service Rep
+  const [repFilter, setRepFilter] = useState("");     // ✅ NEW — Service Rep dropdown
 
   /* ================= DATE TYPE FILTER =================
-     "received"    → service.repairDate (device intake date)
+     "received"    → service.repairDate
      "delivery"    → service.deliveryDate
-     "created"     → job.createdAt (job sheet creation date)
-     "transaction" → row.date (the entry's OWN date — revenueEntries/spareItems/
-                     othersItems/advance/rebillHistory date). ✅ this is the one
-                     to use for month-wise revenue reports that must include
-                     rebills: each transaction (Aug entry, Sep rebill entry,
-                     etc.) files under the month IT actually happened in,
-                     regardless of when the job sheet itself was
-                     created/received/delivered. The other three types are
-                     job-level (same date for every row of that job), so a
-                     rebilled job can vanish entirely from a month's report if
-                     that job's created/received/delivery date falls outside
-                     the range — "Transaction Date" never has that problem
-                     since it filters row-by-row. */
-  const [dateFilterType, setDateFilterType] = useState("received"); // "received" | "delivery" | "created" | "transaction"
+     "created"     → job.createdAt
+     "transaction" → row.date (entry-oda own date) — month-wise revenue + rebill-kku idhu thaan best. */
+  const [dateFilterType, setDateFilterType] = useState("received");
 
   const [data, setData] = useState([]);
- const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [highlightKey, setHighlightKey] = useState(null);
-  const [pendingJump, setPendingJump] = useState(null); 
+  const [pendingJump, setPendingJump] = useState(null);
 
- const jumpToEntry = (jobSheetNo, date, type) => {
+  const jumpToEntry = (jobSheetNo, date, type) => {
     if (!date) return;
     const id = `entry-${jobSheetNo}-${date}-${type}`;
 
-    // Already visible-ah irundha direct-ah scroll pannidalam
     const el = document.getElementById(id);
     if (el) {
       scrollAndHighlight(id);
       return;
     }
 
-    // ✅ FIX — Filter ippo dateFilterType (Received/Delivery/Created/Transaction) base
-    // pannirukku, aana jump panna vendiya entry-oda "date" idhu txn date
-    // (revenueEntries date) — rendum vera date field, so range expand panni
-    // guess panradhu unreliable. Simple-ah From/To clear pannitu — andha entry
-    // certain-ah visible aagum-nu guarantee pandrom.
+    // From/To clear pannina andha entry kandippa visible aagum
     if (fromDate) setFromDate("");
     if (toDate) setToDate("");
-
-    // Filter maarina pinnadi table re-render aagum, appuram jump pannanum
     setPendingJump(id);
   };
-const scrollAndHighlight = (id) => {
+
+  const scrollAndHighlight = (id) => {
     const el = document.getElementById(id);
     if (el) {
       el.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -72,21 +133,19 @@ const scrollAndHighlight = (id) => {
     return match ? match[1] : null;
   };
 
-  const API = import.meta.env.VITE_API_URL;
-
   useEffect(() => { fetchReport(); }, []);
-useEffect(() => {
+
+  useEffect(() => {
     if (!pendingJump) return;
-    // filter state update aagi, table re-render aaganum ku konjam wait pannunga
     const t1 = requestAnimationFrame(() => {
-      const t2 = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
         scrollAndHighlight(pendingJump);
         setPendingJump(null);
       });
-      return () => cancelAnimationFrame(t2);
     });
     return () => cancelAnimationFrame(t1);
   }, [pendingJump, fromDate, toDate, data]);
+
   const fetchReport = async () => {
     setLoading(true);
     try {
@@ -100,32 +159,25 @@ useEffect(() => {
     }
   };
 
-  // ✅ Clear filter — dates clear + reload
+  // Clear filter — dates + search + rep clear, apparam reload
   const handleClearFilter = () => {
     setFromDate("");
     setToDate("");
+    setSearchText("");
+    setRepFilter("");
     fetchReport();
   };
 
-  /* ================= REBILL HISTORY DEDUP (FIX) =================
-     🔴 BUG: adding every rebillHistory snapshot unconditionally double-counted
-     jobs where the pre-rebill cycle's income/service was ALREADY captured
-     date-wise inside revenueEntries (this happens whenever the job went
-     through a normal Update before being invoiced — the backend's
-     updateJobSheet controller pushes a dated revenueEntries row on every
-     income/service change, across every cycle, rebill or not). In that case
-     revenueEntries already equals the true lifetime total (this is what All
-     Report's getIncomeTotal/getServiceTotal already relies on) — adding
-     rebillHistory on top summed the same rupee twice.
-     rebillHistory is only a genuinely MISSING record when a job was invoiced
-     WITHOUT ever going through a normal Update first, so revenueEntries has
-     no entry at all for that cycle's window — only then do we fall back to
-     the rebillHistory snapshot.
-     For each rebill cycle (sorted oldest→newest, bounded by the previous
-     cycle's rebilledAt and this cycle's own rebilledAt), check whether
-     revenueEntries has ANY entry with income/service > 0 inside that window.
-     If yes → already tracked, skip. If no → genuinely missing, use the
-     snapshot. */
+  // Service Rep dropdown options (data-la irukkura reps)
+  const repOptions = useMemo(() => {
+    const set = new Set();
+    data.forEach((j) => { if (j.service?.serviceRep) set.add(j.service.serviceRep); });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [data]);
+
+  /* ================= REBILL HISTORY DEDUP =================
+     revenueEntries-la already track aagirundha cycle-ah rebillHistory-la thirumba
+     serkaama, genuinely missing cycle-ah mattum add pannum. */
   const getUncoveredRebillEntries = (item) => {
     const entries = item.service?.revenueEntries || [];
     const rebillHistoryArr = item.rebillHistory || [];
@@ -136,7 +188,7 @@ useEffect(() => {
     );
 
     const uncovered = [];
-    let cycleStart = null; // no lower bound for the very first cycle
+    let cycleStart = null;
 
     sorted.forEach((rb) => {
       const cycleEnd = rb.rebilledAt ? new Date(rb.rebilledAt) : null;
@@ -150,23 +202,22 @@ useEffect(() => {
       });
 
       if (!hasTrackedEntry) uncovered.push(rb);
-
       cycleStart = cycleEnd;
     });
 
     return uncovered;
   };
 
-
-const buildRows = (jobsheets) => {
+  const buildRows = (jobsheets) => {
     const rows = [];
 
     jobsheets.forEach((item) => {
       const name         = item.customer?.name || "";
+      const contact      = item.customer?.contact || "";      // ✅ NEW
+      const serviceRep   = item.service?.serviceRep || "";    // ✅ NEW
       const jobSheetNo   = item.jobSheetNo || "";
       const repairDate   = item.service?.repairDate?.slice(0, 10) || "";
       const deliveryDate = item.service?.deliveryDate?.slice(0, 10) || "-";
-      // ✅ NEW — job-level "Created Date", used by the Date Type filter.
       const createdAt    = item.createdAt ? new Date(item.createdAt).toISOString().slice(0, 10) : "";
 
       const revenueEntries = item.service?.revenueEntries || [];
@@ -211,12 +262,6 @@ const buildRows = (jobsheets) => {
         addToBucket(repairDate, "others", Number(item.service?.othersAmount || 0));
       }
 
-      // ✅ FIX — only ADD a rebillHistory snapshot when that cycle's
-      // income/service isn't already present in revenueEntries (see
-      // getUncoveredRebillEntries above). This is what stops jobs like
-      // JS-736 — whose pre-rebill cycle was already tracked date-wise via
-      // normal Updates — from being double-counted, while still filling the
-      // genuine gap for jobs invoiced without ever going through an Update.
       getUncoveredRebillEntries(item).forEach((rb) => {
         const d = rb.incomeDate
           ? new Date(rb.incomeDate).toISOString().slice(0, 10)
@@ -233,11 +278,7 @@ const buildRows = (jobsheets) => {
         return { date: d, ...b, rowTotal: b.service + b.spare + b.income + b.others };
       }).filter((r) => r.rowTotal > 0);
 
-      // ✅ FIX: Service ₹ already IS the collected/labour value for that transaction —
-      // Income ₹ is just the same money re-shown as the "total collected" figure
-      // (income = service + spare + others, set by the auto-calc on JobSheetPage).
-      // Adding service + income here was double-counting the same rupee twice.
-      // Only "service" should feed into the balanceable/collected & pending-balance total.
+      // Service ₹ mattum thaan balanceable (Income same amount-ah re-show pannudhu)
       const balanceableTotal = dateRows.reduce((s, r) => s + r.service, 0);
       const jobTotal = dateRows.reduce((s, r) => s + r.rowTotal, 0);
 
@@ -260,13 +301,12 @@ const buildRows = (jobsheets) => {
       const totalAdvancePaid = advanceEvents.reduce((s, a) => s + a.amount, 0);
       const hasAdvance = totalAdvancePaid > 0;
 
-      // ── ELLAM SERTHU oru single chronological timeline (date order-la) ──
+      // ── Ellam serthu single chronological timeline ──
       const events = [
         ...dateRows.map((r) => ({ ...r, kind: "charge" })),
         ...advanceEvents.map((a) => ({ ...a, kind: "advance" })),
       ].sort((a, b) => a.date.localeCompare(b.date));
 
-   // ── Timeline walk pannunga — ovvoru event-kum, ADHUKKU MUNNADI cumulative + source-date track pannunga ──
       let cumService = 0, cumSpare = 0, cumIncome = 0, cumOthers = 0, cumAdvance = 0;
       let srcServiceKey = null, srcSpareKey = null, srcIncomeKey = null, srcOthersKey = null, srcAdvanceKey = null;
 
@@ -278,13 +318,11 @@ const buildRows = (jobsheets) => {
               priorAdvanceKey = srcAdvanceKey;
 
         if (e.kind === "charge") {
-          const rowKey = `entry-${jobSheetNo}-${e.date}-service`;   // ✅ exact ID stored here
-          // ✅ FIX: was `e.service + e.income` (double-counted the same collected amount).
-          // "service" alone is the correct collectible value for this transaction.
+          const rowKey = `entry-${jobSheetNo}-${e.date}-service`;
           const balanceablePart = e.service;
           const immediatePart   = e.spare + e.others;
-      rows.push({
-            date: e.date, jobSheetNo, name,
+          rows.push({
+            date: e.date, jobSheetNo, name, contact, serviceRep,
             type: "service", label: "-",
             service: e.service, spare: e.spare, income: e.income, others: e.others,
             advance: 0,
@@ -306,12 +344,12 @@ const buildRows = (jobsheets) => {
           if (e.income  > 0) srcIncomeKey  = rowKey;
           if (e.others  > 0) srcOthersKey  = rowKey;
         } else {
-          const rowKey = `entry-${jobSheetNo}-${e.date}-advance`;   // ✅ exact ID stored here
+          const rowKey = `entry-${jobSheetNo}-${e.date}-advance`;
           cumAdvance += e.amount;
           srcAdvanceKey = rowKey;
           const remainingBalance = Math.max(0, balanceableTotal - cumAdvance);
           rows.push({
-            date: e.date, jobSheetNo, name,
+            date: e.date, jobSheetNo, name, contact, serviceRep,
             type: "advance", label: e.label,
             service: 0, spare: 0, income: 0, others: 0,
             advance: e.amount, collected: e.amount,
@@ -333,38 +371,32 @@ const buildRows = (jobsheets) => {
     return rows;
   };
 
-  // ✅ picks which date field on a row to filter by, based on dateFilterType.
-  // "delivery" rows without a real delivery date ("-") are treated as no-date
-  // (excluded from a delivery-date range filter, same as before delivery happens).
-  // "transaction" → row.date, the entry's OWN date (see dateFilterType comment above).
   const getFilterDate = (row) => {
     if (dateFilterType === "created")     return row.createdAt || "";
     if (dateFilterType === "delivery")    return (row.deliveryDate && row.deliveryDate !== "-") ? row.deliveryDate : "";
     if (dateFilterType === "transaction") return row.date || "";
-    return row.repairDate || ""; // "received" (default)
+    return row.repairDate || "";
   };
 
   /* ================= FILTER ================= */
-    const getFilteredRows = () => {
+  const getFilteredRows = () => {
     const rows = buildRows(data);
-    let visible = rows.filter(r => !r.hideRow);
+    let visible = rows.filter((r) => !r.hideRow);
 
-    // ✅ NEW — Job No / Name search (case-insensitive, partial match)
+    // ✅ Search — Job No / Name / Contact / Service Rep
     if (searchText.trim()) {
       const q = searchText.trim().toLowerCase();
       visible = visible.filter((row) =>
-        row.jobSheetNo?.toLowerCase().includes(q) ||
-        row.name?.toLowerCase().includes(q)
+        `${row.jobSheetNo} ${row.name} ${row.contact} ${row.serviceRep}`.toLowerCase().includes(q)
       );
     }
 
+    // ✅ Service Rep dropdown
+    if (repFilter) {
+      visible = visible.filter((row) => row.serviceRep === repFilter);
+    }
+
     if (!fromDate && !toDate) return visible;
-    // ✅ FIX — filter now uses the SELECTED date type (Received/Delivery/Created/
-    // Transaction), not always the transaction date. This is what was causing
-    // jobs to "disappear" when picking a date range — the row's txn date and
-    // the job's real received/delivery/created date weren't always the same day.
-    // Pick "Transaction Date" for month-wise revenue reports that must include
-    // rebills split across months (see dateFilterType comment above).
     return visible.filter((row) => {
       const d = getFilterDate(row);
       if (!d) return false;
@@ -376,7 +408,7 @@ const buildRows = (jobsheets) => {
   };
 
   /* ================= GROUP BY DATE ================= */
-   const groupByDate = (rows) => {
+  const groupByDate = (rows) => {
     const grouped = {};
     rows.forEach((row) => {
       const d = getFilterDate(row) || row.date || "Unknown";
@@ -391,476 +423,544 @@ const buildRows = (jobsheets) => {
 
   const allRows     = getFilteredRows();
   const groupedData = groupByDate(allRows);
-const grandService   = allRows.reduce((s, r) => s + r.service,          0);
-const grandSpare     = allRows.reduce((s, r) => s + r.spare,            0);
-const grandIncome    = allRows.reduce((s, r) => s + (r.income || 0),    0);
-const grandOthers    = allRows.reduce((s, r) => s + (r.others || 0),    0);
-const grandAdvance   = allRows.reduce((s, r) => s + r.advance,          0);
-const grandCollected = allRows.reduce((s, r) => s + (r.collected || 0), 0);
-const grandPending   = allRows.reduce((s, r) => s + (r.balance ?? 0),   0);
 
-  // ✅ human label for whichever date type is active, used in the UI + Excel filename
+  const grandService   = allRows.reduce((s, r) => s + r.service,          0);
+  const grandSpare     = allRows.reduce((s, r) => s + r.spare,            0);
+  const grandIncome    = allRows.reduce((s, r) => s + (r.income || 0),    0);
+  const grandOthers    = allRows.reduce((s, r) => s + (r.others || 0),    0);
+  const grandAdvance   = allRows.reduce((s, r) => s + r.advance,          0);
+  const grandCollected = allRows.reduce((s, r) => s + (r.collected || 0), 0);
+  const grandPending   = allRows.reduce((s, r) => s + (r.balance ?? 0),   0);
+
+  const jobsCount = allRows.filter((r) => r.type === "service").length;
+  const advCount  = allRows.filter((r) => r.type === "advance").length;
+
   const dateTypeLabel = dateFilterType === "created" ? "Created Date"
     : dateFilterType === "delivery" ? "Delivery Date"
     : dateFilterType === "transaction" ? "Transaction Date"
     : "Received Date";
 
+  const hasRows = allRows.length > 0;
+
   /* ================= EXCEL DOWNLOAD ================= */
   const handleExcelDownload = () => {
+    const blank = () => ({
+      "Date": "", "Job No": "", "Type": "", "Label": "", "Name": "", "Contact": "", "Service Rep": "",
+      "Repair Date": "", "Txn Date": "", "Delivery Date": "",
+      "Service ₹": "", "Spare ₹": "", "Income ₹": "", "Others ₹": "", "Advance ₹": "",
+      "Collected ₹": "", "Balance ₹": "",
+    });
+    const f2 = (n) => Number(n || 0).toFixed(2);
     const excelRows = [];
 
     Object.keys(groupedData).forEach((date) => {
       const rows = groupedData[date];
 
-      // Date header row
-    excelRows.push({
-  "Date": `📅 ${date}`,
-  "Job No": "", "Type": "", "Label": "", "Name": "",
-  "Repair Date": "", "Txn Date": "", "Delivery Date": "",
-  "Service ₹": "", "Spare ₹": "", "Income ₹": "", "Others ₹": "", "Advance ₹": "",
-  "Collected ₹": "", "Balance ₹": "",
-});
+      excelRows.push({ ...blank(), "Date": `📅 ${date}` });
 
-      // Data rows
       rows.forEach((row) => {
-        const balText = row.balance === null ? "-"
-          : row.balance === 0 ? "Paid"
-          : row.balance.toFixed(2);
-
-      excelRows.push({
-  "Date": date,
-  "Job No": row.jobSheetNo,
-  "Type": row.type === "advance" ? "Advance" : "Service",
-  "Label": row.label,
-  "Name": row.name,
-  "Repair Date": row.repairDate || "-",
-  "Txn Date": row.date,
-  "Delivery Date": row.deliveryDate,
-  "Service ₹": row.type === "advance"
-    ? (row.serviceRef > 0 ? `(${row.serviceRef})` : "-")
-    : (row.service > 0 ? row.service.toFixed(2) : "-"),
-  "Spare ₹": row.spare > 0 ? row.spare.toFixed(2) : "-",
-  "Income ₹": row.type === "advance"
-    ? (row.incomeRef > 0 ? `(${row.incomeRef})` : "-")
-    : (row.income > 0 ? row.income.toFixed(2) : "-"),
-  "Others ₹": row.type === "advance"
-    ? (row.othersRef > 0 ? `(${row.othersRef})` : "-")
-    : (row.others > 0 ? row.others.toFixed(2) : "-"),
-  "Advance ₹": row.advance > 0 ? row.advance.toFixed(2) : "-",
-  "Collected ₹": (row.collected || 0) > 0 ? row.collected.toFixed(2) : "-",
-  "Balance ₹": balText,
-});
+        const balText = row.balance === null ? "-" : row.balance === 0 ? "Paid" : row.balance.toFixed(2);
+        const isAdv = row.type === "advance";
+        excelRows.push({
+          "Date": date,
+          "Job No": row.jobSheetNo,
+          "Type": isAdv ? "Advance" : "Service",
+          "Label": row.label,
+          "Name": row.name,
+          "Contact": row.contact,
+          "Service Rep": row.serviceRep,
+          "Repair Date": row.repairDate || "-",
+          "Txn Date": row.date,
+          "Delivery Date": row.deliveryDate,
+          "Service ₹": isAdv ? "-" : (row.service > 0 ? f2(row.service) : "-"),
+          "Spare ₹": row.spare > 0 ? f2(row.spare) : "-",
+          "Income ₹": isAdv ? "-" : (row.income > 0 ? f2(row.income) : "-"),
+          "Others ₹": isAdv ? "-" : (row.others > 0 ? f2(row.others) : "-"),
+          "Advance ₹": row.advance > 0 ? f2(row.advance) : "-",
+          "Collected ₹": (row.collected || 0) > 0 ? f2(row.collected) : "-",
+          "Balance ₹": balText,
+        });
       });
 
-  const subService   = rows.reduce((s, r) => s + r.service,          0);
-const subSpare     = rows.reduce((s, r) => s + r.spare,            0);
-const subIncome    = rows.reduce((s, r) => s + (r.income || 0),    0);
-const subOthers    = rows.reduce((s, r) => s + (r.others || 0),    0);
-const subAdvance   = rows.reduce((s, r) => s + r.advance,          0);
-const subCollected = rows.reduce((s, r) => s + (r.collected || 0), 0);
-const subBalance   = rows.reduce((s, r) => s + (r.balance ?? 0),   0);
-excelRows.push({
-  "Date": "", "Job No": "", "Type": "", "Label": "", "Name": "",
-  "Repair Date": "", "Txn Date": "", "Delivery Date": `Sub Total (${date})`,
-  "Service ₹": subService.toFixed(2),
-  "Spare ₹": subSpare.toFixed(2),
-  "Income ₹": subIncome.toFixed(2),
-  "Others ₹": subOthers.toFixed(2),
-  "Advance ₹": subAdvance.toFixed(2),
-  "Collected ₹": subCollected.toFixed(2),
-  "Balance ₹": subBalance === 0 ? "-" : subBalance.toFixed(2),
-});
+      const subBalance = rows.reduce((s, r) => s + (r.balance ?? 0), 0);
+      excelRows.push({
+        ...blank(),
+        "Delivery Date": `Sub Total (${date})`,
+        "Service ₹":   f2(rows.reduce((s, r) => s + r.service, 0)),
+        "Spare ₹":     f2(rows.reduce((s, r) => s + r.spare, 0)),
+        "Income ₹":    f2(rows.reduce((s, r) => s + (r.income || 0), 0)),
+        "Others ₹":    f2(rows.reduce((s, r) => s + (r.others || 0), 0)),
+        "Advance ₹":   f2(rows.reduce((s, r) => s + r.advance, 0)),
+        "Collected ₹": f2(rows.reduce((s, r) => s + (r.collected || 0), 0)),
+        "Balance ₹":   subBalance === 0 ? "-" : f2(subBalance),
+      });
 
-// Blank separator
-excelRows.push({
-  "Date": "", "Job No": "", "Type": "", "Label": "", "Name": "",
-  "Repair Date": "", "Txn Date": "", "Delivery Date": "",
-  "Service ₹": "", "Spare ₹": "", "Income ₹": "", "Others ₹": "", "Advance ₹": "",
-  "Collected ₹": "", "Balance ₹": "",
-});
-});
+      excelRows.push(blank());
+    });
 
-// GRAND TOTAL — once, after all dates
-excelRows.push({
-  "Date": "", "Job No": "", "Type": "", "Label": "", "Name": "",
-  "Repair Date": "", "Txn Date": "", "Delivery Date": "GRAND TOTAL",
-  "Service ₹": grandService.toFixed(2),
-  "Spare ₹": grandSpare.toFixed(2),
-  "Income ₹": grandIncome.toFixed(2),
-  "Others ₹": grandOthers.toFixed(2),
-  "Advance ₹": grandAdvance.toFixed(2),
-  "Collected ₹": grandCollected.toFixed(2),
-  "Balance ₹": grandPending === 0 ? "-" : grandPending.toFixed(2),
-});
+    excelRows.push({
+      ...blank(),
+      "Delivery Date": "GRAND TOTAL",
+      "Service ₹": f2(grandService),
+      "Spare ₹": f2(grandSpare),
+      "Income ₹": f2(grandIncome),
+      "Others ₹": f2(grandOthers),
+      "Advance ₹": f2(grandAdvance),
+      "Collected ₹": f2(grandCollected),
+      "Balance ₹": grandPending === 0 ? "-" : f2(grandPending),
+    });
 
     const ws = XLSX.utils.json_to_sheet(excelRows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Value Report");
-
-    const fileName = `ValueReport_${dateFilterType}_${fromDate || "All"}_to_${toDate || "All"}.xlsx`;
-    XLSX.writeFile(wb, fileName);
-  };
-
-  /* ================= BALANCE CELL ================= */
-  const renderBalance = (balance) => {
-    if (balance === null) return { text: "-", color: "#94a3b8", bg: "transparent" };
-    if (balance === 0)    return { text: "✅ Paid", color: "#15803d", bg: "#f0fdf4" };
-    return { text: `₹ ${balance.toFixed(2)}`, color: "#be123c", bg: "#fff1f2" };
+    XLSX.writeFile(wb, `ValueReport_${dateFilterType}_${fromDate || "All"}_to_${toDate || "All"}.xlsx`);
   };
 
   const handlePrint = () => window.print();
 
   return (
-    <div style={{ minHeight: "100vh", background: "#f1f5f9", padding: "24px" }}>
+    <div className="val-page">
+      <div className="val-container">
 
-      <div style={{ marginBottom: 20 }}>
-        <h1 style={{ fontSize: 26, fontWeight: 700, color: "#1e293b", margin: 0 }}>
-          📊 Value Report
-        </h1>
-        <p style={{ color: "#64748b", fontSize: 13, margin: "4px 0 0" }}>
-          Service, spare &amp; advance — each transaction shown on its own date
-        </p>
-      </div>
-
-          <div className="print-hidden" style={{
-        background: "#fff", borderRadius: 10, padding: "14px 18px",
-        marginBottom: 20, display: "flex", flexWrap: "wrap", gap: 10,
-        alignItems: "center", boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
-      }}>
-        {/* ✅ NEW — Job No / Name search */}
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <label style={{ fontSize: 12, color: "#64748b", fontWeight: 600 }}>SEARCH</label>
-          <input
-            type="text"
-            placeholder="Job No / Name"
-            value={searchText}
-            onChange={(e) => setSearchText(e.target.value)}
-            style={{ border: "1px solid #cbd5e1", borderRadius: 6, padding: "5px 10px", fontSize: 13, width: 180 }}
-          />
-        </div>
-
-        {/* ✅ Date Type selector: Received / Delivery / Created / Transaction */}
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <label style={{ fontSize: 12, color: "#64748b", fontWeight: 600 }}>DATE TYPE</label>
-          <select
-            value={dateFilterType}
-            onChange={(e) => setDateFilterType(e.target.value)}
-            style={{ border: "1px solid #cbd5e1", borderRadius: 6, padding: "5px 8px", fontSize: 13, fontWeight: 600, color: "#1e293b" }}
-          >
-            <option value="transaction">Transaction Date (recommended for monthly revenue)</option>
-            <option value="received">Received Date</option>
-            <option value="delivery">Delivery Date</option>
-            <option value="created">Created Date</option>
-          </select>
-        </div>
-
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <label style={{ fontSize: 12, color: "#64748b", fontWeight: 600 }}>FROM</label>
-          <input type="date"
-            style={{ border: "1px solid #cbd5e1", borderRadius: 6, padding: "5px 8px", fontSize: 13 }}
-            value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <label style={{ fontSize: 12, color: "#64748b", fontWeight: 600 }}>TO</label>
-          <input type="date"
-            style={{ border: "1px solid #cbd5e1", borderRadius: 6, padding: "5px 8px", fontSize: 13 }}
-            value={toDate} onChange={(e) => setToDate(e.target.value)} />
-        </div>
-
-        <button onClick={fetchReport} disabled={loading} style={{
-          background: "#2563eb", color: "#fff", border: "none",
-          borderRadius: 7, padding: "7px 18px", fontWeight: 600, fontSize: 13, cursor: "pointer",
-        }}>
-          {loading ? "Loading..." : "Load Report"}
-        </button>
-
-        {/* ✅ Clear Filter — dates clear + full reload */}
-        <button onClick={handleClearFilter} style={{
-          background: "#64748b", color: "#fff", border: "none",
-          borderRadius: 7, padding: "7px 14px", fontWeight: 600, fontSize: 13, cursor: "pointer",
-        }}>
-          Clear Filter
-        </button>
-
-        <button onClick={handlePrint} style={{
-          background: "#16a34a", color: "#fff", border: "none",
-          borderRadius: 7, padding: "7px 14px", fontWeight: 600, fontSize: 13, cursor: "pointer",
-        }}>
-          🖨️ Print 
-        </button>
-
-        {/* ✅ Excel Download button */}
-        <button onClick={handleExcelDownload} style={{
-          background: "#15803d", color: "#fff", border: "none",
-          borderRadius: 7, padding: "7px 14px", fontWeight: 600, fontSize: 13, cursor: "pointer",
-        }}>
-          📥 Excel Download
-        </button>
-
-      {/* SUMMARY CHIPS */}
-        <div style={{ marginLeft: "auto", display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <span style={{ display: "flex", alignItems: "center", gap: 5, background: "#eff6ff", color: "#1d4ed8", borderRadius: 20, padding: "4px 12px", fontSize: 12, fontWeight: 700 }}>
-            <FileText size={13} /> {allRows.filter(r => r.type === "service").length} Jobs
-          </span>
-          <span style={{ display: "flex", alignItems: "center", gap: 5, background: "#f0fdf4", color: "#15803d", borderRadius: 20, padding: "4px 12px", fontSize: 12, fontWeight: 700 }}>
-            <Wallet size={13} /> Collected ₹{grandCollected.toFixed(2)}
-          </span>
-          <span style={{ display: "flex", alignItems: "center", gap: 5, background: "#fef9c3", color: "#854d0e", borderRadius: 20, padding: "4px 12px", fontSize: 12, fontWeight: 700 }}>
-            <Wrench size={13} /> Service ₹{grandService.toFixed(2)}
-          </span>
-          <span style={{ display: "flex", alignItems: "center", gap: 5, background: "#f3e8ff", color: "#7e22ce", borderRadius: 20, padding: "4px 12px", fontSize: 12, fontWeight: 700 }}>
-            <Cog size={13} /> Spare ₹{grandSpare.toFixed(2)}
-          </span>
-          <span style={{ display: "flex", alignItems: "center", gap: 5, background: "#ecfeff", color: "#0e7490", borderRadius: 20, padding: "4px 12px", fontSize: 12, fontWeight: 700 }}>
-            <IndianRupee size={13} /> Income ₹{grandIncome.toFixed(2)}
-          </span>
-          <span style={{ display: "flex", alignItems: "center", gap: 5, background: "#fff7ed", color: "#c2410c", borderRadius: 20, padding: "4px 12px", fontSize: 12, fontWeight: 700 }}>
-            <Package size={13} /> Others ₹{grandOthers.toFixed(2)}
-          </span>
-          <span style={{ display: "flex", alignItems: "center", gap: 5, background: "#f0fdf4", color: "#166534", borderRadius: 20, padding: "4px 12px", fontSize: 12, fontWeight: 700 }}>
-            <HandCoins size={13} /> Advance ₹{grandAdvance.toFixed(2)}
-          </span>
-          <span style={{ display: "flex", alignItems: "center", gap: 5, background: grandPending > 0 ? "#fff1f2" : "#f0fdf4", color: grandPending > 0 ? "#be123c" : "#15803d", borderRadius: 20, padding: "4px 12px", fontSize: 12, fontWeight: 700 }}>
-            <Scale size={13} /> Pending ₹{grandPending.toFixed(2)}
-          </span>
-        </div>
-      </div>
-
-      {/* TABLE */}
-      <div style={{ background: "#fff", borderRadius: 10, boxShadow: "0 1px 6px rgba(0,0,0,0.08)", overflow: "hidden" }}>
-        <div style={{
-          display: "flex", justifyContent: "space-between", alignItems: "center",
-          padding: "12px 18px", background: "#f8fafc", borderBottom: "1px solid #e2e8f0",
-        }}>
-          <span style={{ fontWeight: 700, color: "#334155", fontSize: 14 }}>
-            {allRows.filter(r => r.type === "service").length} jobs &nbsp;|&nbsp;
-            {allRows.filter(r => r.type === "advance").length} advance entries
-          </span>
-          <span style={{ fontSize: 12, color: "#94a3b8" }}>
-            {/* shows which date field is currently driving the filter */}
-            Filtered by <b style={{ color: "#334155" }}>{dateTypeLabel}</b>:{" "}
-            {fromDate || toDate ? `${fromDate || "All"} → ${toDate || "All"}` : "All Dates"}
-          </span>
-        </div>
-
-        {loading ? (
-          <div style={{ textAlign: "center", padding: 60, color: "#64748b" }}>⏳ Loading...</div>
-        ) : allRows.length === 0 ? (
-          <div style={{ textAlign: "center", padding: 60, color: "#94a3b8" }}>No records found.</div>
-        ) : (
-          <div style={{ overflowX: "auto", maxHeight: 560 }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-              <thead>
-                <tr style={{ background: "#1e293b", color: "#fff", position: "sticky", top: 0, zIndex: 10 }}>
-                  <th style={th}>Job No</th>
-                  <th style={th}>Type</th>
-                  <th style={th}>Label</th>
-                  <th style={th}>Name</th>
-                  <th style={th}>Repair Date</th>
-                  <th style={th}>Txn Date</th>
-                  <th style={th}>Delivery Date</th>
-                <th style={{ ...th, textAlign: "right" }}>Service ₹</th>
-<th style={{ ...th, textAlign: "right" }}>Spare ₹</th>
-<th style={{ ...th, textAlign: "right" }}>Income ₹</th>
-<th style={{ ...th, textAlign: "right" }}>Others ₹</th>
-<th style={{ ...th, textAlign: "right" }}>Advance ₹</th>
-                  <th style={{ ...th, textAlign: "right" }}>Collected ₹</th>
-                  <th style={{ ...th, textAlign: "right", background: "#be123c" }}>Balance ₹</th>
-                </tr>
-              </thead>
-              <tbody>
-                {Object.keys(groupedData).map((date, gIdx) => {
-              const rows         = groupedData[date];
-const subService   = rows.reduce((s, r) => s + r.service,          0);
-const subSpare     = rows.reduce((s, r) => s + r.spare,            0);
-const subIncome    = rows.reduce((s, r) => s + (r.income || 0),    0);
-const subOthers    = rows.reduce((s, r) => s + (r.others || 0),    0);
-const subAdvance   = rows.reduce((s, r) => s + r.advance,          0);
-const subCollected = rows.reduce((s, r) => s + (r.collected || 0), 0);
-const subBalance   = rows.reduce((s, r) => s + (r.balance ?? 0),   0);
-
-                  return (
-                    <React.Fragment key={gIdx}>
-                      <tr>
-                       <td colSpan={14} style={{
-  padding: "7px 14px", background: "#dbeafe", color: "#1e40af",
-                          fontWeight: 700, fontSize: 12,
-                          borderTop: "2px solid #93c5fd", borderBottom: "1px solid #bfdbfe",
-                        }}>
-                          📅 {date}
-                        </td>
-                      </tr>
-
-                      {rows.map((row, rIdx) => {
-                        const bal = renderBalance(row.balance);
-                        return (
-                         <tr key={rIdx}
-                            id={`entry-${row.jobSheetNo}-${row.date}-${row.type}`}
-                            style={{
-                            background: highlightKey === `entry-${row.jobSheetNo}-${row.date}-${row.type}`
-                              ? "#fef08a"
-                              : row.type === "advance"
-                              ? rIdx % 2 === 0 ? "#f0fdf4" : "#dcfce7"
-                              : rIdx % 2 === 0 ? "#fff" : "#f8fafc",
-                            borderBottom: "1px solid #f1f5f9",
-                            transition: "background 0.3s",
-                          }}>
-                            <td style={td}>{row.jobSheetNo}</td>
-                            <td style={td}>
-                              {row.type === "advance" ? (
-                                <span style={{ background: "#bbf7d0", color: "#14532d", borderRadius: 12, padding: "2px 8px", fontSize: 11, fontWeight: 700 }}>
-                                  💰 Advance
-                                </span>
-                              ) : (
-                                <span style={{ background: "#dbeafe", color: "#1e3a8a", borderRadius: 12, padding: "2px 8px", fontSize: 11, fontWeight: 700 }}>
-                                  🔧 Service
-                                </span>
-                              )}
-                            </td>
-                            <td style={{ ...td, color: "#64748b", fontSize: 12 }}>{row.label}</td>
-      <td style={td}>{row.name}</td>
-                            <td style={td}>{row.repairDate || "-"}</td>
-                            <td style={{ ...td, fontWeight: 600, color: "#0f172a" }}>{row.date}</td>
-                            <td style={td}>{row.deliveryDate}</td>
-                            <td style={{ ...td, textAlign: "right" }}>
-                              {row.service > 0 ? `₹ ${row.service.toFixed(2)}` : "-"}
-                            {row.priorService > 0 && (
-                                <div
-                                  style={{ fontSize: 11, color: "#94a3b8", fontWeight: 500, cursor: "pointer", textDecoration: "underline" }}
-                                  onClick={() => jumpToEntry(row.jobSheetNo, row.priorServiceDate, "service")}
-                                >
-                                  Already ₹{row.priorService}
-                                </div>
-                              )}
-                            </td>
-                          <td style={{ ...td, textAlign: "right" }}>
-  {row.spare > 0 ? `₹ ${row.spare.toFixed(2)}` : "-"}
- {row.priorSpare > 0 && (
-  <div
-    style={{ fontSize: 11, color: "#94a3b8", fontWeight: 500, cursor: "pointer", textDecoration: "underline" }}
-    onClick={() => jumpToEntry(row.jobSheetNo, row.priorSpareDate, "service")}
-  >
-    Already ₹{row.priorSpare}
-  </div>
-)}
-</td>
-<td style={{ ...td, textAlign: "right" }}>
-  {row.income > 0 ? `₹ ${row.income.toFixed(2)}` : "-"}
-{row.priorIncome > 0 && (
-  <div
-    style={{ fontSize: 11, color: "#94a3b8", fontWeight: 500, cursor: "pointer", textDecoration: "underline" }}
-    onClick={() => jumpToEntry(row.jobSheetNo, row.priorIncomeDate, "service")}
-  >
-    Already ₹{row.priorIncome}
-  </div>
-)}
-</td>
-<td style={{ ...td, textAlign: "right" }}>
-  {row.others > 0 ? `₹ ${row.others.toFixed(2)}` : "-"}
-{row.priorOthers > 0 && (
-  <div
-    style={{ fontSize: 11, color: "#94a3b8", fontWeight: 500, cursor: "pointer", textDecoration: "underline" }}
-    onClick={() => jumpToEntry(row.jobSheetNo, row.priorOthersDate, "service")}
-  >
-    Already ₹{row.priorOthers}
-  </div>
-)}
-</td>
-<td style={{ ...td, textAlign: "right", color: "#15803d", fontWeight: 600 }}>
-  {row.advance > 0 ? `₹ ${row.advance.toFixed(2)}` : "-"}
-{row.priorAdvance > 0 && (
-  <div
-    style={{ fontSize: 11, color: "#94a3b8", fontWeight: 500, cursor: "pointer", textDecoration: "underline" }}
-    onClick={() => jumpToEntry(row.jobSheetNo, row.priorAdvanceDate, "advance")}
-  >
-    Already ₹{row.priorAdvance}
-  </div>
-)}
-</td>
-                            <td style={{ ...td, textAlign: "right", fontWeight: 700, color: "#15803d" }}>
-                              {(row.collected || 0) > 0 ? `₹ ${row.collected.toFixed(2)}` : "-"}
-                            </td>
-                            <td style={{ ...td, textAlign: "right", fontWeight: 700, color: bal.color, background: bal.bg }}>
-                              {bal.text}
-                            </td>
-                          </tr>
-                        );
-                      })}
-
-                      {/* SUB TOTAL */}
-                    <tr style={{ background: "#f1f5f9", fontWeight: 700 }}>
-  <td colSpan={7} style={{ ...td, textAlign: "right", color: "#475569" }}>
-    Sub Total ({date})
-  </td>
-  <td style={{ ...td, textAlign: "right" }}>₹ {subService.toFixed(2)}</td>
-  <td style={{ ...td, textAlign: "right" }}>₹ {subSpare.toFixed(2)}</td>
-  <td style={{ ...td, textAlign: "right" }}>₹ {subIncome.toFixed(2)}</td>
-  <td style={{ ...td, textAlign: "right" }}>₹ {subOthers.toFixed(2)}</td>
-  <td style={{ ...td, textAlign: "right", color: "#15803d" }}>₹ {subAdvance.toFixed(2)}</td>
-  <td style={{ ...td, textAlign: "right", color: "#15803d" }}>₹ {subCollected.toFixed(2)}</td>
-  <td style={{
-    ...td, textAlign: "right",
-    color: subBalance > 0 ? "#be123c" : "#64748b",
-    background: subBalance > 0 ? "#fff1f2" : "transparent",
-  }}>
-    {subBalance === 0 ? "-" : `₹ ${subBalance.toFixed(2)}`}
-  </td>
-</tr>
-                    </React.Fragment>
-                  );
-                })}
-
-                {/* GRAND TOTAL */}
-             <tr style={{ background: "#1e293b", color: "#fff", fontWeight: 800, fontSize: 14 }}>
-  <td colSpan={7} style={{ ...td, textAlign: "right", color: "#fff", borderTop: "2px solid #334155" }}>
-    GRAND TOTAL
-  </td>
-  <td style={{ ...td, textAlign: "right", color: "#fde68a", borderTop: "2px solid #334155" }}>
-    ₹ {grandService.toFixed(2)}
-  </td>
-  <td style={{ ...td, textAlign: "right", color: "#c4b5fd", borderTop: "2px solid #334155" }}>
-    ₹ {grandSpare.toFixed(2)}
-  </td>
-  <td style={{ ...td, textAlign: "right", color: "#fbcfe8", borderTop: "2px solid #334155" }}>
-    ₹ {grandIncome.toFixed(2)}
-  </td>
-  <td style={{ ...td, textAlign: "right", color: "#fed7aa", borderTop: "2px solid #334155" }}>
-    ₹ {grandOthers.toFixed(2)}
-  </td>
-  <td style={{ ...td, textAlign: "right", color: "#86efac", borderTop: "2px solid #334155" }}>
-    ₹ {grandAdvance.toFixed(2)}
-  </td>
-  <td style={{ ...td, textAlign: "right", color: "#86efac", borderTop: "2px solid #334155" }}>
-    ₹ {grandCollected.toFixed(2)}
-  </td>
-  <td style={{ ...td, textAlign: "right", borderTop: "2px solid #334155", background: grandPending > 0 ? "#be123c" : "#166534", color: "#fff" }}>
-    {grandPending === 0 ? "-" : `₹ ${grandPending.toFixed(2)}`}
-  </td>
-</tr>
-              </tbody>
-            </table>
+        {/* ============ HEADER ============ */}
+        <div className="val-header">
+          <div className="val-header-left">
+            <div className="val-logo"><BarChart3 size={28} /></div>
+            <div>
+              <h1 className="val-title">Value Report</h1>
+              <div className="val-subtitle">Service, spare &amp; advance — each transaction shown on its own date</div>
+            </div>
           </div>
-        )}
+
+          <div className="val-header-actions val-noprint">
+            <button className="val-btn val-btn-ghost" onClick={handlePrint}>
+              <Printer size={16} /> Print
+            </button>
+            <button className="val-btn val-btn-green" onClick={handleExcelDownload} disabled={!hasRows}>
+              <FileSpreadsheet size={16} /> Excel Download
+            </button>
+          </div>
+        </div>
+
+        {/* ============ FILTER BAR ============ */}
+        <div className="val-card val-noprint" style={{ padding: 20, marginBottom: 20 }}>
+          <div className="val-card-title">
+            <Filter size={16} color="#2563eb" /> Filters
+          </div>
+
+          <div className="val-filter-row">
+            <Field label="Search" icon={Search} className="val-f-search">
+              <div className="val-input-wrap">
+                <Search size={16} className="val-input-icon" />
+                <input
+                  type="text"
+                  className="val-input has-icon"
+                  placeholder="Job No / Name / Contact / Rep"
+                  value={searchText}
+                  onChange={(e) => setSearchText(e.target.value)}
+                />
+              </div>
+            </Field>
+
+            <Field label="Service Rep" icon={User} className="val-f-rep">
+              <div className="val-input-wrap">
+                <User size={16} className="val-input-icon" />
+                <select
+                  className="val-input has-icon"
+                  value={repFilter}
+                  onChange={(e) => setRepFilter(e.target.value)}
+                >
+                  <option value="">All Reps</option>
+                  {repOptions.map((r) => (<option key={r} value={r}>{r}</option>))}
+                </select>
+              </div>
+            </Field>
+
+            <Field label="Date Type" icon={CalendarDays} className="val-f-type">
+              <select
+                className="val-input"
+                value={dateFilterType}
+                onChange={(e) => setDateFilterType(e.target.value)}
+              >
+                <option value="transaction">Transaction Date (Recommended)</option>
+                <option value="received">Received Date</option>
+                <option value="delivery">Delivery Date</option>
+                <option value="created">Created Date</option>
+              </select>
+            </Field>
+
+            <Field label="From" icon={CalendarDays} className="val-f-date">
+              <input type="date" className="val-input" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+            </Field>
+
+            <Field label="To" icon={CalendarDays} className="val-f-date">
+              <input type="date" className="val-input" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+            </Field>
+
+            <div className="val-f-actions">
+              <button className="val-btn val-btn-primary" onClick={fetchReport} disabled={loading}>
+                {loading ? <Loader2 size={16} className="val-spin" /> : <Search size={16} />}
+                {loading ? "Loading" : "Load Report"}
+              </button>
+              <button className="val-btn val-btn-ghost" onClick={handleClearFilter} title="Clear Filter">
+                <RotateCcw size={16} /> Clear
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* ============ STAT CARDS ============ */}
+        <div className="val-stats">
+          <StatCard icon={FileText}    label="Total Jobs" value={jobsCount}            tone={TONES.blue} />
+          <StatCard icon={Wallet}      label="Collected"  value={money(grandCollected)} tone={TONES.green} />
+          <StatCard icon={Wrench}      label="Service"    value={money(grandService)}   tone={TONES.amber} />
+          <StatCard icon={Cog}         label="Spare"      value={money(grandSpare)}     tone={TONES.violet} />
+          <StatCard icon={IndianRupee} label="Income"     value={money(grandIncome)}    tone={TONES.cyan} />
+          <StatCard icon={Package}     label="Others"     value={money(grandOthers)}    tone={TONES.orange} />
+          <StatCard icon={HandCoins}   label="Advance"    value={money(grandAdvance)}   tone={TONES.green} />
+          <StatCard icon={Scale}       label="Pending"    value={money(grandPending)}   tone={grandPending > 0 ? TONES.rose : TONES.green} />
+        </div>
+
+        {/* ============ RESULT CARD ============ */}
+        <div className="val-card" style={{ overflow: "hidden" }}>
+          <div className="val-result-head">
+            <div className="val-result-title">
+              <FileText size={18} color="#64748b" />
+              {jobsCount} jobs <span style={{ color: "#cbd5e1" }}>|</span> {advCount} advance entries
+            </div>
+            <div className="val-chips">
+              <span className="val-chip" style={{ background: "#f1f5f9", color: "#475569" }}>
+                <CalendarDays size={12} />
+                {dateTypeLabel}:&nbsp;
+                {fromDate || toDate ? `${fmtDMY(fromDate) === "-" ? "All" : fmtDMY(fromDate)} → ${fmtDMY(toDate) === "-" ? "All" : fmtDMY(toDate)}` : "All Dates"}
+              </span>
+              {repFilter && (
+                <span className="val-chip" style={{ background: "#eff6ff", color: "#1d4ed8" }}>
+                  <User size={12} /> {repFilter}
+                </span>
+              )}
+              {searchText.trim() && (
+                <span className="val-chip" style={{ background: "#f5f3ff", color: "#6d28d9" }}>
+                  <Search size={12} /> "{searchText.trim()}"
+                </span>
+              )}
+            </div>
+          </div>
+
+          {loading ? (
+            <div className="val-empty">
+              <Loader2 size={32} className="val-spin" />
+              <div className="val-empty-sub">Loading report...</div>
+            </div>
+          ) : !hasRows ? (
+            <div className="val-empty">
+              <div className="val-empty-icon"><Inbox size={30} /></div>
+              <div className="val-empty-title">No records found</div>
+              <div className="val-empty-sub">Date range / Service Rep maathi try pannunga</div>
+            </div>
+          ) : (
+            <div className="val-table-wrap">
+              <table className="val-table">
+                <thead>
+                  <tr>
+                    <Th icon={Hash}>Job No</Th>
+                    <Th icon={Tag}>Type</Th>
+                    <Th>Label</Th>
+                    <Th icon={User}>Name</Th>
+                    <Th icon={Users}>Service Rep</Th>
+                    <Th>Repair Date</Th>
+                    <Th>Txn Date</Th>
+                    <Th>Delivery Date</Th>
+                    <Th className="r">Service ₹</Th>
+                    <Th className="r">Spare ₹</Th>
+                    <Th className="r">Income ₹</Th>
+                    <Th className="r">Others ₹</Th>
+                    <Th className="r">Advance ₹</Th>
+                    <Th className="r">Collected ₹</Th>
+                    <Th className="r bal">Balance ₹</Th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {Object.keys(groupedData).map((date) => {
+                    const rows         = groupedData[date];
+                    const subService   = rows.reduce((s, r) => s + r.service,          0);
+                    const subSpare     = rows.reduce((s, r) => s + r.spare,            0);
+                    const subIncome    = rows.reduce((s, r) => s + (r.income || 0),    0);
+                    const subOthers    = rows.reduce((s, r) => s + (r.others || 0),    0);
+                    const subAdvance   = rows.reduce((s, r) => s + r.advance,          0);
+                    const subCollected = rows.reduce((s, r) => s + (r.collected || 0), 0);
+                    const subBalance   = rows.reduce((s, r) => s + (r.balance ?? 0),   0);
+
+                    return (
+                      <React.Fragment key={date}>
+                        <tr className="val-date-row">
+                          <td colSpan={15}>
+                            <div className="val-date-cell">
+                              <CalendarDays size={16} />
+                              {fmtDMY(date)}
+                              <span className="val-count">
+                                {rows.length} {rows.length > 1 ? "entries" : "entry"}
+                              </span>
+                            </div>
+                          </td>
+                        </tr>
+
+                        {rows.map((row, rIdx) => {
+                          const rowId = `entry-${row.jobSheetNo}-${row.date}-${row.type}`;
+                          const isAdv = row.type === "advance";
+                          const rc = repColor(row.serviceRep);
+                          return (
+                            <tr
+                              key={rIdx}
+                              id={rowId}
+                              className={`val-row ${isAdv ? "val-row-adv" : ""} ${highlightKey === rowId ? "val-hl" : ""}`}
+                            >
+                              <td><span className="val-jobpill">{row.jobSheetNo}</span></td>
+                              <td>
+                                {isAdv ? (
+                                  <span className="val-badge val-badge-adv"><HandCoins size={12} /> Advance</span>
+                                ) : (
+                                  <span className="val-badge val-badge-svc"><Wrench size={12} /> Service</span>
+                                )}
+                              </td>
+                              <td style={{ color: "#64748b", fontSize: 12 }}>{row.label}</td>
+                              <td>
+                                <div className="val-cust">{row.name || "-"}</div>
+                                {row.contact && (
+                                  <div className="val-contact"><Phone size={11} /> {row.contact}</div>
+                                )}
+                              </td>
+                              <td>
+                                {row.serviceRep ? (
+                                  <span className="val-rep">
+                                    <span className="val-avatar" style={{ background: rc.bg, color: rc.fg }}>
+                                      {row.serviceRep.charAt(0).toUpperCase()}
+                                    </span>
+                                    {row.serviceRep}
+                                  </span>
+                                ) : (
+                                  <span className="val-dash">-</span>
+                                )}
+                              </td>
+                              <td>{fmtDMY(row.repairDate)}</td>
+                              <td style={{ fontWeight: 600, color: "#0f172a" }}>{fmtDMY(row.date)}</td>
+                              <td>{fmtDMY(row.deliveryDate)}</td>
+
+                              <AmountCell
+                                value={row.service}
+                                prior={row.priorService}
+                                onJump={() => jumpToEntry(row.jobSheetNo, row.priorServiceDate, "service")}
+                              />
+                              <AmountCell
+                                value={row.spare}
+                                prior={row.priorSpare}
+                                onJump={() => jumpToEntry(row.jobSheetNo, row.priorSpareDate, "service")}
+                              />
+                              <AmountCell
+                                value={row.income}
+                                prior={row.priorIncome}
+                                onJump={() => jumpToEntry(row.jobSheetNo, row.priorIncomeDate, "service")}
+                              />
+                              <AmountCell
+                                value={row.others}
+                                prior={row.priorOthers}
+                                onJump={() => jumpToEntry(row.jobSheetNo, row.priorOthersDate, "service")}
+                              />
+                              <AmountCell
+                                className="val-green"
+                                value={row.advance}
+                                prior={row.priorAdvance}
+                                onJump={() => jumpToEntry(row.jobSheetNo, row.priorAdvanceDate, "advance")}
+                              />
+
+                              <td className="r val-green val-bold">
+                                {(row.collected || 0) > 0 ? money(row.collected) : <span className="val-dash">-</span>}
+                              </td>
+
+                              {row.balance === null ? (
+                                <td className="r"><span className="val-dash">-</span></td>
+                              ) : row.balance === 0 ? (
+                                <td className="r val-bal-paid">
+                                  <span className="val-paid"><CheckCircle2 size={14} /> Paid</span>
+                                </td>
+                              ) : (
+                                <td className="r val-bal-due">{money(row.balance)}</td>
+                              )}
+                            </tr>
+                          );
+                        })}
+
+                        {/* SUB TOTAL */}
+                        <tr className="val-sub-row">
+                          <td colSpan={8} className="r">Sub Total ({fmtDMY(date)})</td>
+                          <td className="r">{money(subService)}</td>
+                          <td className="r">{money(subSpare)}</td>
+                          <td className="r">{money(subIncome)}</td>
+                          <td className="r">{money(subOthers)}</td>
+                          <td className="r val-green">{money(subAdvance)}</td>
+                          <td className="r val-green">{money(subCollected)}</td>
+                          <td className={`r ${subBalance > 0 ? "val-bal-due" : ""}`}>
+                            {subBalance === 0 ? "-" : money(subBalance)}
+                          </td>
+                        </tr>
+                      </React.Fragment>
+                    );
+                  })}
+
+                  {/* GRAND TOTAL */}
+                  <tr className="val-grand-row">
+                    <td colSpan={8} className="r">Grand Total</td>
+                    <td className="r" style={{ color: "#fde68a" }}>{money(grandService)}</td>
+                    <td className="r" style={{ color: "#c4b5fd" }}>{money(grandSpare)}</td>
+                    <td className="r" style={{ color: "#a5f3fc" }}>{money(grandIncome)}</td>
+                    <td className="r" style={{ color: "#fed7aa" }}>{money(grandOthers)}</td>
+                    <td className="r" style={{ color: "#86efac" }}>{money(grandAdvance)}</td>
+                    <td className="r" style={{ color: "#86efac" }}>{money(grandCollected)}</td>
+                    <td className="r" style={{ background: grandPending > 0 ? "#be123c" : "#166534" }}>
+                      {grandPending === 0 ? "-" : money(grandPending)}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </div>
 
+      {/* ============ SCOPED STYLES (Bootstrap-oda clash aagaadhu) ============ */}
       <style>{`
+        .val-page, .val-page * { box-sizing: border-box; }
+        .val-page { min-height: 100vh; background: #f1f5f9; padding: 24px 32px; color: #1e293b; }
+        .val-container { max-width: 1600px; margin: 0 auto; }
+
+        /* header */
+        .val-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+        .val-header-left { display: flex; align-items: center; gap: 16px; }
+        .val-header-actions { display: flex; align-items: center; gap: 8px; }
+        .val-logo { width: 56px; height: 56px; border-radius: 16px; display: flex; align-items: center; justify-content: center; color: #fff;
+          background: linear-gradient(135deg, #6366f1, #7c3aed); box-shadow: 0 8px 18px rgba(99,102,241,.3); flex-shrink: 0; }
+        .val-title { margin: 0; font-size: 28px; font-weight: 800; line-height: 1.2; letter-spacing: -0.3px; color: #1e293b; }
+        .val-subtitle { margin-top: 2px; font-size: 14px; color: #64748b; }
+
+        /* card */
+        .val-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; box-shadow: 0 1px 2px rgba(15,23,42,.05); }
+        .val-card-title { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; color: #334155; margin-bottom: 16px; }
+
+        /* filter row */
+        .val-filter-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px; }
+        .val-f-search { flex: 2 1 250px; }
+        .val-f-rep { flex: 1 1 170px; }
+        .val-f-type { flex: 1.3 1 220px; }
+        .val-f-date { flex: 1 1 145px; }
+        .val-f-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }
+        .val-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+        .val-label { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #64748b; line-height: 1; }
+        .val-label svg { flex-shrink: 0; }
+
+        /* inputs */
+        .val-input-wrap { position: relative; }
+        .val-input-icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #94a3b8; pointer-events: none; }
+        .val-input { display: block; width: 100%; height: 40px; padding: 0 12px; font-size: 14px; color: #1e293b; background: #fff;
+          border: 1px solid #cbd5e1; border-radius: 10px; outline: none; transition: border-color .15s, box-shadow .15s; font-family: inherit; }
+        .val-input.has-icon { padding-left: 38px; }
+        .val-input::placeholder { color: #94a3b8; }
+        .val-input:focus { border-color: #2563eb; box-shadow: 0 0 0 4px #dbeafe; }
+
+        /* buttons */
+        .val-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 40px; padding: 0 18px; font-size: 14px; font-weight: 600;
+          border: 1px solid transparent; border-radius: 10px; cursor: pointer; white-space: nowrap; transition: background .15s; font-family: inherit; line-height: 1; }
+        .val-btn:disabled { opacity: .55; cursor: not-allowed; }
+        .val-btn-primary { background: #2563eb; color: #fff; box-shadow: 0 1px 2px rgba(37,99,235,.35); }
+        .val-btn-primary:hover:not(:disabled) { background: #1d4ed8; }
+        .val-btn-green { background: #059669; color: #fff; }
+        .val-btn-green:hover:not(:disabled) { background: #047857; }
+        .val-btn-ghost { background: #fff; color: #334155; border-color: #cbd5e1; }
+        .val-btn-ghost:hover:not(:disabled) { background: #f8fafc; }
+
+        /* stat cards */
+        .val-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 16px; margin-bottom: 20px; }
+        .val-stat { display: flex; align-items: center; gap: 14px; background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 16px; box-shadow: 0 1px 2px rgba(15,23,42,.05); }
+        .val-stat-icon { width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .val-stat-label { font-size: 12px; font-weight: 600; color: #64748b; }
+        .val-stat-value { font-size: 20px; font-weight: 800; color: #1e293b; line-height: 1.2; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+        /* result head */
+        .val-result-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 16px 24px; border-bottom: 1px solid #e2e8f0; }
+        .val-result-title { display: flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 700; color: #1e293b; }
+        .val-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+        .val-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+
+        /* empty */
+        .val-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 80px 20px; color: #94a3b8; }
+        .val-empty-icon { width: 64px; height: 64px; border-radius: 50%; background: #f1f5f9; display: flex; align-items: center; justify-content: center; }
+        .val-empty-title { font-size: 16px; font-weight: 600; color: #64748b; }
+        .val-empty-sub { font-size: 14px; }
+        .val-spin { animation: valSpin 1s linear infinite; }
+        @keyframes valSpin { to { transform: rotate(360deg); } }
+
+        /* table */
+        .val-table-wrap { overflow: auto; max-height: 640px; }
+        .val-table { width: 100%; min-width: 1500px; border-collapse: collapse; font-size: 13px; }
+        .val-table th { position: sticky; top: 0; z-index: 2; background: #1e293b; color: #f1f5f9; font-size: 11.5px; font-weight: 600; letter-spacing: .05em;
+          text-transform: uppercase; text-align: left; padding: 12px 12px; white-space: nowrap; }
+        .val-table th.bal { background: #be123c; }
+        .val-table th.r, .val-table td.r { text-align: right; }
+        .val-th { display: inline-flex; align-items: center; gap: 6px; }
+        .val-table td { padding: 10px 12px; vertical-align: middle; white-space: nowrap; }
+
+        .val-date-row td { background: #eff6ff; border-top: 2px solid #93c5fd; border-bottom: 1px solid #bfdbfe; padding: 9px 14px; }
+        .val-date-cell { display: flex; align-items: center; gap: 8px; font-weight: 700; color: #1e3a8a; }
+        .val-count { padding: 2px 8px; border-radius: 999px; background: #dbeafe; color: #1d4ed8; font-size: 11px; font-weight: 600; }
+
+        .val-row td { border-bottom: 1px solid #f1f5f9; transition: background .3s; }
+        .val-row:hover td { background: #f8fafc; }
+        .val-row-adv td { background: #f0fdf4; }
+        .val-row-adv:hover td { background: #dcfce7; }
+        .val-row.val-hl td { background: #fef08a !important; }
+
+        .val-jobpill { display: inline-block; padding: 3px 8px; border-radius: 6px; background: #f1f5f9; color: #334155; font-size: 12px; font-weight: 700; }
+        .val-badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+        .val-badge-adv { background: #bbf7d0; color: #14532d; }
+        .val-badge-svc { background: #dbeafe; color: #1e3a8a; }
+        .val-cust { font-weight: 600; color: #1e293b; }
+        .val-contact { display: flex; align-items: center; gap: 4px; margin-top: 2px; font-size: 12px; color: #64748b; }
+        .val-rep { display: inline-flex; align-items: center; gap: 8px; font-weight: 500; color: #334155; }
+        .val-avatar { width: 26px; height: 26px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
+        .val-dash { color: #94a3b8; }
+        .val-green { color: #15803d; }
+        .val-bold { font-weight: 700; }
+        .val-table td.r { font-variant-numeric: tabular-nums; }
+        .val-already { margin-top: 2px; font-size: 11px; font-weight: 500; color: #94a3b8; cursor: pointer; text-decoration: underline; }
+        .val-already:hover { color: #2563eb; }
+
+        .val-bal-due { color: #be123c; background: #fff1f2 !important; font-weight: 700; }
+        .val-bal-paid { background: #f0fdf4 !important; }
+        .val-paid { display: inline-flex; align-items: center; gap: 4px; color: #15803d; font-weight: 700; }
+
+        .val-sub-row td { background: #f1f5f9; padding: 10px 12px; font-weight: 700; color: #1e293b; }
+        .val-sub-row td:first-child { font-size: 12px; letter-spacing: .05em; text-transform: uppercase; color: #64748b; }
+        .val-grand-row td { background: #1e293b; color: #fff; padding: 14px 12px; font-size: 14px; font-weight: 800; border-top: 2px solid #334155; }
+        .val-grand-row td:first-child { font-size: 13px; letter-spacing: .06em; text-transform: uppercase; }
+
+        @media (max-width: 640px) {
+          .val-page { padding: 16px; }
+          .val-title { font-size: 22px; }
+        }
+
         @media print {
-          .print-hidden { display: none !important; }
-          body { background: white !important; }
+          .val-noprint { display: none !important; }
+          .val-page { background: #fff; padding: 0; }
+          .val-card, .val-stat { box-shadow: none !important; }
+          .val-table-wrap { overflow: visible; max-height: none; }
+          .val-table { min-width: 0; font-size: 10px; }
+          .val-table th { position: static; }
+          .val-row, .val-sub-row { break-inside: avoid; }
+          .val-table th, .val-grand-row td, .val-date-row td, .val-row-adv td, .val-bal-due { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         }
       `}</style>
     </div>
   );
-};
-
-const th = {
-  padding: "10px 12px", textAlign: "left", fontWeight: 700,
-  fontSize: 12, whiteSpace: "nowrap", borderRight: "1px solid #334155",
-};
-
-const td = {
-  padding: "8px 12px", fontSize: 13,
-  whiteSpace: "nowrap", borderRight: "1px solid #e2e8f0",
 };
 
 export default ValueReport;

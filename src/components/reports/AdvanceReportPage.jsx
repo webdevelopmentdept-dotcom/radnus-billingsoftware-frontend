@@ -1,67 +1,165 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import axios from "axios";
 import * as XLSX from "xlsx";
+import {
+  Wallet, Search, User, Users, CalendarDays, RotateCcw, Printer,
+  FileSpreadsheet, FileText, Receipt, IndianRupee, Loader2, Inbox,
+  Phone, Filter, Hash, Tag,
+} from "lucide-react";
 
+const API = import.meta.env.VITE_API_URL;
+
+/* ================= HELPERS ================= */
+const toYMD = (val) => (val ? new Date(val).toLocaleDateString("en-CA") : "");
+const todayStr = () => new Date().toLocaleDateString("en-CA");
+const fmtDMY = (ymd) => (ymd ? ymd.split("-").reverse().join("-") : "—");
+const money = (n) =>
+  `₹${Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+const emptyFilters = () => ({ q: "", rep: "", from: todayStr(), to: todayStr() });
+
+/* Rep name-ku fixed color — same rep-ku eppovum same color */
+const REP_COLORS = [
+  { bg: "#dbeafe", fg: "#1d4ed8" },
+  { bg: "#d1fae5", fg: "#047857" },
+  { bg: "#ede9fe", fg: "#6d28d9" },
+  { bg: "#fef3c7", fg: "#b45309" },
+  { bg: "#ffe4e6", fg: "#be123c" },
+  { bg: "#cffafe", fg: "#0e7490" },
+  { bg: "#fae8ff", fg: "#a21caf" },
+  { bg: "#ecfccb", fg: "#4d7c0f" },
+];
+const repColor = (name = "") => {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return REP_COLORS[h % REP_COLORS.length];
+};
+
+const TONES = {
+  blue: { bg: "#dbeafe", fg: "#2563eb" },
+  violet: { bg: "#ede9fe", fg: "#7c3aed" },
+  amber: { bg: "#fef3c7", fg: "#d97706" },
+  green: { bg: "#d1fae5", fg: "#059669" },
+};
+
+/* ================= SMALL UI PARTS ================= */
+const Field = ({ label, icon: Icon, className = "", children }) => (
+  <div className={`adv-field ${className}`}>
+    <div className="adv-label">
+      {Icon && <Icon size={12} />}
+      <span>{label}</span>
+    </div>
+    {children}
+  </div>
+);
+
+const StatCard = ({ icon: Icon, label, value, tone }) => (
+  <div className="adv-stat">
+    <div className="adv-stat-icon" style={{ background: tone.bg, color: tone.fg }}>
+      <Icon size={20} />
+    </div>
+    <div style={{ minWidth: 0 }}>
+      <div className="adv-stat-label">{label}</div>
+      <div className="adv-stat-value">{value}</div>
+    </div>
+  </div>
+);
+
+/* ================= PAGE ================= */
 const AdvanceReportPage = () => {
-  const [fromDate, setFromDate] = useState("");
-  const [toDate, setToDate] = useState("");
-  const [groupedData, setGroupedData] = useState({});
-  const [grandTotal, setGrandTotal] = useState(0);
-  const API = import.meta.env.VITE_API_URL;
+  const [rawData, setRawData] = useState([]);
+  const [filters, setFilters] = useState(emptyFilters());
+  const [applied, setApplied] = useState(emptyFilters());
+  const [loading, setLoading] = useState(false);
 
-  const fetchReport = async () => {
+  const loadReport = async (f = filters) => {
+    setLoading(true);
     try {
       const res = await axios.get(`${API}/api/jobsheets/filter`, { params: {} });
-      processData(res.data);
+      setRawData(res.data || []);
+      setApplied(f);
     } catch (err) {
       console.error(err);
       alert("Report load failed ❌");
+    } finally {
+      setLoading(false);
     }
   };
 
-  useEffect(() => { fetchReport(); }, []);
+  useEffect(() => { loadReport(); }, []);
 
-  const processData = (jobsheets) => {
+  const handleClear = () => {
+    const reset = emptyFilters();
+    setFilters(reset);
+    loadReport(reset);
+  };
+
+  const repOptions = useMemo(() => {
+    const set = new Set();
+    rawData.forEach((j) => { if (j.service?.serviceRep) set.add(j.service.serviceRep); });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [rawData]);
+
+  /* ===== Filter + group by date ===== */
+  const { groupedData, grandTotal, jobCount, entryCount, repCount } = useMemo(() => {
     const grouped = {};
+    const jobSet = new Set();
+    const repSet = new Set();
     let gTotal = 0;
+    let entries = 0;
+    const q = applied.q.trim().toLowerCase();
 
-    jobsheets.forEach((item) => {
-      const jobSheetNo = item.jobSheetNo;
-      const name       = item.customer?.name || "";
-      const repairDate = item.service?.repairDate?.slice(0, 10) || "";
+    rawData.forEach((item) => {
+      const jobSheetNo = item.jobSheetNo || "";
+      const name = item.customer?.name || "";
+      const contact = item.customer?.contact || "";
+      const serviceRep = item.service?.serviceRep || "";
+      const repairDate = toYMD(item.service?.repairDate);
+
+      if (q) {
+        const hay = `${jobSheetNo} ${name} ${contact} ${serviceRep}`.toLowerCase();
+        if (!hay.includes(q)) return;
+      }
+      if (applied.rep && serviceRep !== applied.rep) return;
+
       const advanceItems = item.service?.advanceItems || [];
+      const list = [];
 
-      let entries = [];
       if (advanceItems.length > 0) {
         advanceItems.forEach((adv) => {
           const amt = Number(adv.amount || 0);
-          if (amt > 0) {
-            const d = adv.date ? new Date(adv.date).toISOString().slice(0, 10) : repairDate;
-            entries.push({ date: d, label: adv.label || "-", amount: amt });
-          }
+          if (amt > 0) list.push({ date: adv.date ? toYMD(adv.date) : repairDate, label: adv.label || "-", amount: amt });
         });
       } else {
         const amt = Number(item.service?.advanceAmount || 0);
         if (amt > 0) {
-          const d = item.service?.advanceDate ? new Date(item.service.advanceDate).toISOString().slice(0, 10) : repairDate;
-          entries.push({ date: d, label: "-", amount: amt });
+          list.push({
+            date: item.service?.advanceDate ? toYMD(item.service.advanceDate) : repairDate,
+            label: "-",
+            amount: amt,
+          });
         }
       }
 
-      entries.forEach((e) => {
-        if (fromDate && e.date < fromDate) return;
-        if (toDate && e.date > toDate) return;
+      list.forEach((e) => {
+        if (applied.from && e.date < applied.from) return;
+        if (applied.to && e.date > applied.to) return;
         if (!grouped[e.date]) grouped[e.date] = [];
-        grouped[e.date].push({ jobSheetNo, name, label: e.label, amount: e.amount });
+        grouped[e.date].push({ jobSheetNo, name, contact, serviceRep, label: e.label, amount: e.amount });
         gTotal += e.amount;
+        entries += 1;
+        jobSet.add(jobSheetNo);
+        if (serviceRep) repSet.add(serviceRep);
       });
     });
 
     const sorted = {};
     Object.keys(grouped).sort((a, b) => b.localeCompare(a)).forEach((k) => (sorted[k] = grouped[k]));
-    setGroupedData(sorted);
-    setGrandTotal(gTotal);
-  };
+
+    return { groupedData: sorted, grandTotal: gTotal, jobCount: jobSet.size, entryCount: entries, repCount: repSet.size };
+  }, [rawData, applied]);
+
+  const hasRows = Object.keys(groupedData).length > 0;
 
   const handlePrint = () => window.print();
 
@@ -69,7 +167,16 @@ const AdvanceReportPage = () => {
     const rows = [];
     Object.entries(groupedData).forEach(([date, records]) => {
       records.forEach((item, i) => {
-        rows.push({ "Date": date, "SL No": i + 1, "Job Sheet": item.jobSheetNo, "Customer": item.name, "Label": item.label, "Amount": item.amount });
+        rows.push({
+          "Date": date,
+          "SL No": i + 1,
+          "Job Sheet": item.jobSheetNo,
+          "Customer": item.name,
+          "Contact": item.contact,
+          "Service Rep": item.serviceRep,
+          "Label": item.label,
+          "Amount": item.amount,
+        });
       });
     });
     const ws = XLSX.utils.json_to_sheet(rows);
@@ -79,71 +186,326 @@ const AdvanceReportPage = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 p-6">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold">💰 Advance Payment Report</h1>
-        <p className="text-sm text-gray-500">Date-wise advance payments received</p>
-      </div>
+    <div className="adv-page">
+      <div className="adv-container">
 
-      <div className="bg-white p-5 rounded-xl shadow mb-6 flex flex-wrap gap-4 items-end print:hidden">
-        <div className="flex flex-col">
-          <label className="text-xs mb-1 text-gray-500">From Date</label>
-          <input type="date" className="border px-3 py-2 rounded-lg" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+        {/* ============ HEADER ============ */}
+        <div className="adv-header">
+          <div className="adv-header-left">
+            <div className="adv-logo"><Wallet size={28} /></div>
+            <div>
+              <h1 className="adv-title">Advance Report</h1>
+              <div className="adv-subtitle">Advance payments received — each entry shown on its own date</div>
+            </div>
+          </div>
+
+          <div className="adv-header-actions adv-noprint">
+            <button className="adv-btn adv-btn-ghost" onClick={handlePrint}>
+              <Printer size={16} /> Print
+            </button>
+            <button className="adv-btn adv-btn-green" onClick={handleExcel} disabled={!hasRows}>
+              <FileSpreadsheet size={16} /> Excel Download
+            </button>
+          </div>
         </div>
-        <div className="flex flex-col">
-          <label className="text-xs mb-1 text-gray-500">To Date</label>
-          <input type="date" className="border px-3 py-2 rounded-lg" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+
+        {/* ============ FILTER BAR ============ */}
+        <div className="adv-card adv-noprint" style={{ padding: 20, marginBottom: 20 }}>
+          <div className="adv-card-title">
+            <Filter size={16} color="#2563eb" /> Filters
+          </div>
+
+          <div className="adv-filter-row">
+            <Field label="Search" icon={Search} className="adv-f-search">
+              <div className="adv-input-wrap">
+                <Search size={16} className="adv-input-icon" />
+                <input
+                  type="text"
+                  className="adv-input has-icon"
+                  placeholder="Job No / Name / Contact / Rep"
+                  value={filters.q}
+                  onChange={(e) => setFilters({ ...filters, q: e.target.value })}
+                  onKeyDown={(e) => { if (e.key === "Enter") loadReport(filters); }}
+                />
+              </div>
+            </Field>
+
+            <Field label="Service Rep" icon={User} className="adv-f-rep">
+              <div className="adv-input-wrap">
+                <User size={16} className="adv-input-icon" />
+                <select
+                  className="adv-input has-icon"
+                  value={filters.rep}
+                  onChange={(e) => setFilters({ ...filters, rep: e.target.value })}
+                >
+                  <option value="">All Reps</option>
+                  {repOptions.map((r) => (<option key={r} value={r}>{r}</option>))}
+                </select>
+              </div>
+            </Field>
+
+            <Field label="From" icon={CalendarDays} className="adv-f-date">
+              <input
+                type="date"
+                className="adv-input"
+                value={filters.from}
+                onChange={(e) => setFilters({ ...filters, from: e.target.value })}
+              />
+            </Field>
+
+            <Field label="To" icon={CalendarDays} className="adv-f-date">
+              <input
+                type="date"
+                className="adv-input"
+                value={filters.to}
+                onChange={(e) => setFilters({ ...filters, to: e.target.value })}
+              />
+            </Field>
+
+            <div className="adv-f-actions">
+              <button className="adv-btn adv-btn-primary" onClick={() => loadReport(filters)} disabled={loading}>
+                {loading ? <Loader2 size={16} className="adv-spin" /> : <Search size={16} />}
+                {loading ? "Loading" : "Load"}
+              </button>
+              <button className="adv-btn adv-btn-ghost" onClick={handleClear} title="Clear Filter">
+                <RotateCcw size={16} /> Clear
+              </button>
+            </div>
+          </div>
         </div>
-        <button onClick={fetchReport} className="bg-black text-white px-6 py-2 rounded-lg">🔍 Search</button>
-        <button onClick={() => { setFromDate(""); setToDate(""); fetchReport(); }} className="bg-gray-500 text-white px-6 py-2 rounded-lg">Clear</button>
-        <button onClick={handlePrint} className="bg-green-600 text-white px-6 py-2 rounded-lg">Print</button>
-        <button onClick={handleExcel} className="bg-blue-600 text-white px-6 py-2 rounded-lg" disabled={Object.keys(groupedData).length === 0}>⬇ Excel</button>
+
+        {/* ============ STAT CARDS ============ */}
+        <div className="adv-stats">
+          <StatCard icon={FileText} label="Total Jobs" value={jobCount} tone={TONES.blue} />
+          <StatCard icon={Receipt} label="Advance Entries" value={entryCount} tone={TONES.violet} />
+          <StatCard icon={Users} label="Service Reps" value={repCount} tone={TONES.amber} />
+          <StatCard icon={IndianRupee} label="Total Advance" value={money(grandTotal)} tone={TONES.green} />
+        </div>
+
+        {/* ============ RESULT CARD ============ */}
+        <div className="adv-card" style={{ overflow: "hidden" }}>
+          <div className="adv-result-head">
+            <div className="adv-result-title">
+              <FileText size={18} color="#64748b" />
+              {jobCount} jobs <span style={{ color: "#cbd5e1" }}>|</span> {entryCount} advance entries
+            </div>
+            <div className="adv-chips">
+              <span className="adv-chip" style={{ background: "#f1f5f9", color: "#475569" }}>
+                <CalendarDays size={12} /> {fmtDMY(applied.from)} → {fmtDMY(applied.to)}
+              </span>
+              {applied.rep && (
+                <span className="adv-chip" style={{ background: "#eff6ff", color: "#1d4ed8" }}>
+                  <User size={12} /> {applied.rep}
+                </span>
+              )}
+              {applied.q && (
+                <span className="adv-chip" style={{ background: "#f5f3ff", color: "#6d28d9" }}>
+                  <Search size={12} /> "{applied.q}"
+                </span>
+              )}
+            </div>
+          </div>
+
+          {loading ? (
+            <div className="adv-empty">
+              <Loader2 size={32} className="adv-spin" />
+              <div className="adv-empty-sub">Loading report...</div>
+            </div>
+          ) : !hasRows ? (
+            <div className="adv-empty">
+              <div className="adv-empty-icon"><Inbox size={30} /></div>
+              <div className="adv-empty-title">No records found</div>
+              <div className="adv-empty-sub">Date range / Service Rep maathi try pannunga</div>
+            </div>
+          ) : (
+            <div className="adv-table-wrap">
+              <table className="adv-table">
+                <thead>
+                  <tr>
+                    <th className="c" style={{ width: 64 }}>SL</th>
+                    <th><span className="adv-th"><Hash size={13} /> Job Sheet</span></th>
+                    <th><span className="adv-th"><User size={13} /> Customer</span></th>
+                    <th><span className="adv-th"><Users size={13} /> Service Rep</span></th>
+                    <th><span className="adv-th"><Tag size={13} /> Label</span></th>
+                    <th className="r"><span className="adv-th"><IndianRupee size={13} /> Amount</span></th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {Object.entries(groupedData).map(([date, records]) => {
+                    const subTotal = records.reduce((sum, r) => sum + Number(r.amount), 0);
+                    return (
+                      <React.Fragment key={date}>
+                        <tr className="adv-date-row">
+                          <td colSpan="6">
+                            <div className="adv-date-cell">
+                              <CalendarDays size={16} />
+                              {fmtDMY(date)}
+                              <span className="adv-count">
+                                {records.length} {records.length > 1 ? "entries" : "entry"}
+                              </span>
+                            </div>
+                          </td>
+                        </tr>
+
+                        {records.map((item, i) => {
+                          const rc = repColor(item.serviceRep);
+                          return (
+                            <tr key={i} className="adv-row">
+                              <td className="c" style={{ color: "#94a3b8" }}>{i + 1}</td>
+                              <td><span className="adv-jobpill">{item.jobSheetNo}</span></td>
+                              <td>
+                                <div className="adv-cust">{item.name || "-"}</div>
+                                {item.contact && (
+                                  <div className="adv-contact"><Phone size={11} /> {item.contact}</div>
+                                )}
+                              </td>
+                              <td>
+                                {item.serviceRep ? (
+                                  <span className="adv-rep">
+                                    <span className="adv-avatar" style={{ background: rc.bg, color: rc.fg }}>
+                                      {item.serviceRep.charAt(0).toUpperCase()}
+                                    </span>
+                                    {item.serviceRep}
+                                  </span>
+                                ) : (
+                                  <span style={{ color: "#94a3b8" }}>-</span>
+                                )}
+                              </td>
+                              <td style={{ color: "#475569" }}>{item.label}</td>
+                              <td className="r adv-amt">{money(item.amount)}</td>
+                            </tr>
+                          );
+                        })}
+
+                        <tr className="adv-sub-row">
+                          <td colSpan="5" className="r">Sub Total</td>
+                          <td className="r adv-amt">{money(subTotal)}</td>
+                        </tr>
+                      </React.Fragment>
+                    );
+                  })}
+                </tbody>
+
+                <tfoot>
+                  <tr className="adv-grand-row">
+                    <td colSpan="5" className="r">Grand Total</td>
+                    <td className="r">{money(grandTotal)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </div>
       </div>
 
-      <div className="bg-white rounded-xl shadow">
-        <table className="w-full border text-sm">
-          <thead className="bg-gray-200">
-            <tr>
-              <th className="border p-3">SL</th>
-              <th className="border p-3">JobSheet</th>
-              <th className="border p-3">Customer</th>
-              <th className="border p-3">Label</th>
-              <th className="border p-3">Amount</th>
-            </tr>
-          </thead>
-          <tbody>
-            {Object.entries(groupedData).map(([date, records], idx) => {
-              const subTotal = records.reduce((sum, r) => sum + Number(r.amount), 0);
-              return (
-                <React.Fragment key={idx}>
-                  <tr className="bg-blue-50 font-semibold">
-                    <td colSpan="5" className="p-3 border">📅 {date}</td>
-                  </tr>
-                  {records.map((item, i) => (
-                    <tr key={i}>
-                      <td className="border p-2">{i + 1}</td>
-                      <td className="border p-2">{item.jobSheetNo}</td>
-                      <td className="border p-2">{item.name}</td>
-                      <td className="border p-2">{item.label}</td>
-                      <td className="border p-2 font-semibold">₹ {item.amount}</td>
-                    </tr>
-                  ))}
-                  <tr className="bg-gray-100 font-semibold">
-                    <td colSpan="4" className="text-right p-2 border">Sub Total</td>
-                    <td className="p-2 border">₹ {subTotal}</td>
-                  </tr>
-                </React.Fragment>
-              );
-            })}
-            <tr className="bg-green-100 font-bold text-lg">
-              <td colSpan="4" className="text-right p-3 border">Grand Total</td>
-              <td className="p-3 border">₹ {grandTotal}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+      {/* ============ SCOPED STYLES (Bootstrap-oda clash aagaadhu) ============ */}
+      <style>{`
+        .adv-page, .adv-page * { box-sizing: border-box; }
+        .adv-page { min-height: 100vh; background: #f1f5f9; padding: 24px 32px; color: #1e293b; }
+        .adv-container { max-width: 1400px; margin: 0 auto; }
 
-      <style>{`@media print { .print\\:hidden{ display:none; } body{ background:white; } }`}</style>
+        /* header */
+        .adv-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+        .adv-header-left { display: flex; align-items: center; gap: 16px; }
+        .adv-header-actions { display: flex; align-items: center; gap: 8px; }
+        .adv-logo { width: 56px; height: 56px; border-radius: 16px; display: flex; align-items: center; justify-content: center; color: #fff;
+          background: linear-gradient(135deg, #10b981, #0d9488); box-shadow: 0 8px 18px rgba(16,185,129,.28); flex-shrink: 0; }
+        .adv-title { margin: 0; font-size: 28px; font-weight: 800; line-height: 1.2; letter-spacing: -0.3px; color: #1e293b; }
+        .adv-subtitle { margin-top: 2px; font-size: 14px; color: #64748b; }
+
+        /* card */
+        .adv-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; box-shadow: 0 1px 2px rgba(15,23,42,.05); }
+        .adv-card-title { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; color: #334155; margin-bottom: 16px; }
+
+        /* filter row */
+        .adv-filter-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px; }
+        .adv-f-search { flex: 2 1 260px; }
+        .adv-f-rep { flex: 1 1 190px; }
+        .adv-f-date { flex: 1 1 150px; }
+        .adv-f-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }
+        .adv-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+        .adv-label { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #64748b; line-height: 1; }
+        .adv-label svg { flex-shrink: 0; }
+
+        /* inputs */
+        .adv-input-wrap { position: relative; }
+        .adv-input-icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #94a3b8; pointer-events: none; }
+        .adv-input { display: block; width: 100%; height: 40px; padding: 0 12px; font-size: 14px; color: #1e293b; background: #fff;
+          border: 1px solid #cbd5e1; border-radius: 10px; outline: none; transition: border-color .15s, box-shadow .15s; font-family: inherit; }
+        .adv-input.has-icon { padding-left: 38px; }
+        .adv-input::placeholder { color: #94a3b8; }
+        .adv-input:focus { border-color: #2563eb; box-shadow: 0 0 0 4px #dbeafe; }
+
+        /* buttons */
+        .adv-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 40px; padding: 0 18px; font-size: 14px; font-weight: 600;
+          border: 1px solid transparent; border-radius: 10px; cursor: pointer; white-space: nowrap; transition: background .15s, box-shadow .15s; font-family: inherit; line-height: 1; }
+        .adv-btn:disabled { opacity: .55; cursor: not-allowed; }
+        .adv-btn-primary { background: #2563eb; color: #fff; box-shadow: 0 1px 2px rgba(37,99,235,.35); }
+        .adv-btn-primary:hover:not(:disabled) { background: #1d4ed8; }
+        .adv-btn-green { background: #059669; color: #fff; }
+        .adv-btn-green:hover:not(:disabled) { background: #047857; }
+        .adv-btn-ghost { background: #fff; color: #334155; border-color: #cbd5e1; }
+        .adv-btn-ghost:hover:not(:disabled) { background: #f8fafc; }
+
+        /* stat cards */
+        .adv-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 20px; }
+        .adv-stat { display: flex; align-items: center; gap: 14px; background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 16px; box-shadow: 0 1px 2px rgba(15,23,42,.05); }
+        .adv-stat-icon { width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .adv-stat-label { font-size: 12px; font-weight: 600; color: #64748b; }
+        .adv-stat-value { font-size: 22px; font-weight: 800; color: #1e293b; line-height: 1.2; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+        /* result head */
+        .adv-result-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 16px 24px; border-bottom: 1px solid #e2e8f0; }
+        .adv-result-title { display: flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 700; color: #1e293b; }
+        .adv-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+        .adv-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+
+        /* empty */
+        .adv-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 80px 20px; color: #94a3b8; }
+        .adv-empty-icon { width: 64px; height: 64px; border-radius: 50%; background: #f1f5f9; display: flex; align-items: center; justify-content: center; }
+        .adv-empty-title { font-size: 16px; font-weight: 600; color: #64748b; }
+        .adv-empty-sub { font-size: 14px; }
+        .adv-spin { animation: advSpin 1s linear infinite; }
+        @keyframes advSpin { to { transform: rotate(360deg); } }
+
+        /* table */
+        .adv-table-wrap { overflow-x: auto; }
+        .adv-table { width: 100%; min-width: 820px; border-collapse: collapse; font-size: 14px; }
+        .adv-table th { background: #1e293b; color: #f1f5f9; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; text-align: left; padding: 12px 16px; }
+        .adv-table th.c, .adv-table td.c { text-align: center; }
+        .adv-table th.r, .adv-table td.r { text-align: right; }
+        .adv-th { display: inline-flex; align-items: center; gap: 6px; }
+        .adv-table td { padding: 12px 16px; vertical-align: middle; }
+        .adv-date-row td { background: #eff6ff; border-top: 1px solid #dbeafe; border-bottom: 1px solid #dbeafe; padding: 10px 16px; }
+        .adv-date-cell { display: flex; align-items: center; gap: 8px; font-weight: 700; color: #1e3a8a; }
+        .adv-count { padding: 2px 8px; border-radius: 999px; background: #dbeafe; color: #1d4ed8; font-size: 11px; font-weight: 600; }
+        .adv-row td { border-bottom: 1px solid #f1f5f9; }
+        .adv-row:hover td { background: #f8fafc; }
+        .adv-jobpill { display: inline-block; padding: 3px 8px; border-radius: 6px; background: #f1f5f9; color: #334155; font-size: 12px; font-weight: 700; }
+        .adv-cust { font-weight: 600; color: #1e293b; }
+        .adv-contact { display: flex; align-items: center; gap: 4px; margin-top: 2px; font-size: 12px; color: #64748b; }
+        .adv-rep { display: inline-flex; align-items: center; gap: 8px; font-weight: 500; color: #334155; }
+        .adv-avatar { width: 28px; height: 28px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
+        .adv-amt { font-weight: 700; color: #1e293b; font-variant-numeric: tabular-nums; }
+        .adv-sub-row td { background: #f8fafc; padding: 10px 16px; font-weight: 700; color: #1e293b; }
+        .adv-sub-row td:first-child { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: #64748b; }
+        .adv-grand-row td { background: #059669; color: #fff; padding: 16px; font-size: 16px; font-weight: 800; font-variant-numeric: tabular-nums; }
+        .adv-grand-row td:first-child { font-size: 14px; letter-spacing: .06em; text-transform: uppercase; }
+
+        @media (max-width: 640px) {
+          .adv-page { padding: 16px; }
+          .adv-title { font-size: 22px; }
+        }
+
+        @media print {
+          .adv-noprint { display: none !important; }
+          .adv-page { background: #fff; padding: 0; }
+          .adv-card, .adv-stat { box-shadow: none !important; }
+          .adv-row, .adv-sub-row { break-inside: avoid; }
+          .adv-table th, .adv-grand-row td, .adv-date-row td { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        }
+      `}</style>
     </div>
   );
 };
