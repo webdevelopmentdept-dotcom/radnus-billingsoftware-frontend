@@ -3,8 +3,8 @@ import axios from "axios";
 import * as XLSX from "xlsx";
 import {
   BarChart3, Search, User, Users, CalendarDays, RotateCcw, Printer,
-  FileSpreadsheet, FileText, Wallet, Wrench, Cog, IndianRupee, Package,
-  HandCoins, Scale, Loader2, Inbox, Phone, Filter, Hash, Tag, CheckCircle2, Clock,
+  FileSpreadsheet, FileText, Wrench, Cog, IndianRupee, Package,
+  HandCoins, Loader2, Inbox, Phone, Filter, Hash, Tag, Clock,
 } from "lucide-react";
 
 const API = import.meta.env.VITE_API_URL;
@@ -278,8 +278,6 @@ const ValueReport = () => {
         return { date: d, ...b, rowTotal: b.service + b.spare + b.income + b.others };
       }).filter((r) => r.rowTotal > 0);
 
-      // Service ₹ mattum thaan balanceable (Income same amount-ah re-show pannudhu)
-      const balanceableTotal = dateRows.reduce((s, r) => s + r.service, 0);
       const jobTotal = dateRows.reduce((s, r) => s + r.rowTotal, 0);
 
       // ── Advance events ──
@@ -297,9 +295,6 @@ const ValueReport = () => {
           : repairDate;
         if (advAmt > 0) advanceEvents.push({ date: advDate, amount: advAmt, label: "-" });
       }
-
-      const totalAdvancePaid = advanceEvents.reduce((s, a) => s + a.amount, 0);
-      const hasAdvance = totalAdvancePaid > 0;
 
       // ── Ellam serthu single chronological timeline ──
       const events = [
@@ -319,16 +314,12 @@ const ValueReport = () => {
 
         if (e.kind === "charge") {
           const rowKey = `entry-${jobSheetNo}-${e.date}-service`;
-          const balanceablePart = e.service;
-          const immediatePart   = e.spare + e.others;
           rows.push({
             date: e.date, jobSheetNo, name, contact, serviceRep,
             type: "service", label: "-",
             service: e.service, spare: e.spare, income: e.income, others: e.others,
             advance: 0,
-            collected: immediatePart + (hasAdvance ? 0 : balanceablePart),
-            balance: null,
-            jobTotal, hasAdvance, hideRow: false,
+            jobTotal, hideRow: false,
             rowTotal: e.rowTotal, repairDate, deliveryDate, createdAt,
             priorService, priorSpare, priorIncome, priorOthers, priorAdvance,
             priorServiceKey, priorSpareKey, priorIncomeKey, priorOthersKey, priorAdvanceKey,
@@ -347,14 +338,12 @@ const ValueReport = () => {
           const rowKey = `entry-${jobSheetNo}-${e.date}-advance`;
           cumAdvance += e.amount;
           srcAdvanceKey = rowKey;
-          const remainingBalance = Math.max(0, balanceableTotal - cumAdvance);
           rows.push({
             date: e.date, jobSheetNo, name, contact, serviceRep,
             type: "advance", label: e.label,
             service: 0, spare: 0, income: 0, others: 0,
-            advance: e.amount, collected: e.amount,
-            balance: remainingBalance,
-            jobTotal, hasAdvance: true, hideRow: false,
+            advance: e.amount,
+            jobTotal, hideRow: false,
             rowTotal: e.amount, repairDate, deliveryDate, createdAt,
             priorService, priorSpare, priorIncome, priorOthers, priorAdvance,
             priorServiceKey, priorSpareKey, priorIncomeKey, priorOthersKey, priorAdvanceKey,
@@ -429,8 +418,6 @@ const ValueReport = () => {
   const grandIncome    = allRows.reduce((s, r) => s + (r.income || 0),    0);
   const grandOthers    = allRows.reduce((s, r) => s + (r.others || 0),    0);
   const grandAdvance   = allRows.reduce((s, r) => s + r.advance,          0);
-  const grandCollected = allRows.reduce((s, r) => s + (r.collected || 0), 0);
-  const grandPending   = allRows.reduce((s, r) => s + (r.balance ?? 0),   0);
 
   const jobsCount = allRows.filter((r) => r.type === "service").length;
   const advCount  = allRows.filter((r) => r.type === "advance").length;
@@ -448,7 +435,6 @@ const ValueReport = () => {
       "Date": "", "Job No": "", "Type": "", "Label": "", "Name": "", "Contact": "", "Service Rep": "",
       "Repair Date": "", "Txn Date": "", "Delivery Date": "",
       "Service ₹": "", "Spare ₹": "", "Income ₹": "", "Others ₹": "", "Advance ₹": "",
-      "Collected ₹": "", "Balance ₹": "",
     });
     const f2 = (n) => Number(n || 0).toFixed(2);
     const excelRows = [];
@@ -459,7 +445,6 @@ const ValueReport = () => {
       excelRows.push({ ...blank(), "Date": `📅 ${date}` });
 
       rows.forEach((row) => {
-        const balText = row.balance === null ? "-" : row.balance === 0 ? "Paid" : row.balance.toFixed(2);
         const isAdv = row.type === "advance";
         excelRows.push({
           "Date": date,
@@ -477,12 +462,9 @@ const ValueReport = () => {
           "Income ₹": isAdv ? "-" : (row.income > 0 ? f2(row.income) : "-"),
           "Others ₹": isAdv ? "-" : (row.others > 0 ? f2(row.others) : "-"),
           "Advance ₹": row.advance > 0 ? f2(row.advance) : "-",
-          "Collected ₹": (row.collected || 0) > 0 ? f2(row.collected) : "-",
-          "Balance ₹": balText,
         });
       });
 
-      const subBalance = rows.reduce((s, r) => s + (r.balance ?? 0), 0);
       excelRows.push({
         ...blank(),
         "Delivery Date": `Sub Total (${date})`,
@@ -491,8 +473,6 @@ const ValueReport = () => {
         "Income ₹":    f2(rows.reduce((s, r) => s + (r.income || 0), 0)),
         "Others ₹":    f2(rows.reduce((s, r) => s + (r.others || 0), 0)),
         "Advance ₹":   f2(rows.reduce((s, r) => s + r.advance, 0)),
-        "Collected ₹": f2(rows.reduce((s, r) => s + (r.collected || 0), 0)),
-        "Balance ₹":   subBalance === 0 ? "-" : f2(subBalance),
       });
 
       excelRows.push(blank());
@@ -506,8 +486,6 @@ const ValueReport = () => {
       "Income ₹": f2(grandIncome),
       "Others ₹": f2(grandOthers),
       "Advance ₹": f2(grandAdvance),
-      "Collected ₹": f2(grandCollected),
-      "Balance ₹": grandPending === 0 ? "-" : f2(grandPending),
     });
 
     const ws = XLSX.utils.json_to_sheet(excelRows);
@@ -612,13 +590,11 @@ const ValueReport = () => {
         {/* ============ STAT CARDS ============ */}
         <div className="val-stats">
           <StatCard icon={FileText}    label="Total Jobs" value={jobsCount}            tone={TONES.blue} />
-          <StatCard icon={Wallet}      label="Collected"  value={money(grandCollected)} tone={TONES.green} />
           <StatCard icon={Wrench}      label="Service"    value={money(grandService)}   tone={TONES.amber} />
           <StatCard icon={Cog}         label="Spare"      value={money(grandSpare)}     tone={TONES.violet} />
           <StatCard icon={IndianRupee} label="Income"     value={money(grandIncome)}    tone={TONES.cyan} />
           <StatCard icon={Package}     label="Others"     value={money(grandOthers)}    tone={TONES.orange} />
           <StatCard icon={HandCoins}   label="Advance"    value={money(grandAdvance)}   tone={TONES.green} />
-          <StatCard icon={Scale}       label="Pending"    value={money(grandPending)}   tone={grandPending > 0 ? TONES.rose : TONES.green} />
         </div>
 
         {/* ============ RESULT CARD ============ */}
@@ -676,8 +652,6 @@ const ValueReport = () => {
                     <Th className="r">Income ₹</Th>
                     <Th className="r">Others ₹</Th>
                     <Th className="r">Advance ₹</Th>
-                    <Th className="r">Collected ₹</Th>
-                    <Th className="r bal">Balance ₹</Th>
                   </tr>
                 </thead>
 
@@ -689,13 +663,11 @@ const ValueReport = () => {
                     const subIncome    = rows.reduce((s, r) => s + (r.income || 0),    0);
                     const subOthers    = rows.reduce((s, r) => s + (r.others || 0),    0);
                     const subAdvance   = rows.reduce((s, r) => s + r.advance,          0);
-                    const subCollected = rows.reduce((s, r) => s + (r.collected || 0), 0);
-                    const subBalance   = rows.reduce((s, r) => s + (r.balance ?? 0),   0);
 
                     return (
                       <React.Fragment key={date}>
                         <tr className="val-date-row">
-                          <td colSpan={15}>
+                          <td colSpan={13}>
                             <div className="val-date-cell">
                               <CalendarDays size={16} />
                               {fmtDMY(date)}
@@ -773,20 +745,6 @@ const ValueReport = () => {
                                 prior={row.priorAdvance}
                                 onJump={() => jumpToEntry(row.jobSheetNo, row.priorAdvanceDate, "advance")}
                               />
-
-                              <td className="r val-green val-bold">
-                                {(row.collected || 0) > 0 ? money(row.collected) : <span className="val-dash">-</span>}
-                              </td>
-
-                              {row.balance === null ? (
-                                <td className="r"><span className="val-dash">-</span></td>
-                              ) : row.balance === 0 ? (
-                                <td className="r val-bal-paid">
-                                  <span className="val-paid"><CheckCircle2 size={14} /> Paid</span>
-                                </td>
-                              ) : (
-                                <td className="r val-bal-due">{money(row.balance)}</td>
-                              )}
                             </tr>
                           );
                         })}
@@ -799,10 +757,6 @@ const ValueReport = () => {
                           <td className="r">{money(subIncome)}</td>
                           <td className="r">{money(subOthers)}</td>
                           <td className="r val-green">{money(subAdvance)}</td>
-                          <td className="r val-green">{money(subCollected)}</td>
-                          <td className={`r ${subBalance > 0 ? "val-bal-due" : ""}`}>
-                            {subBalance === 0 ? "-" : money(subBalance)}
-                          </td>
                         </tr>
                       </React.Fragment>
                     );
@@ -816,10 +770,6 @@ const ValueReport = () => {
                     <td className="r" style={{ color: "#a5f3fc" }}>{money(grandIncome)}</td>
                     <td className="r" style={{ color: "#fed7aa" }}>{money(grandOthers)}</td>
                     <td className="r" style={{ color: "#86efac" }}>{money(grandAdvance)}</td>
-                    <td className="r" style={{ color: "#86efac" }}>{money(grandCollected)}</td>
-                    <td className="r" style={{ background: grandPending > 0 ? "#be123c" : "#166534" }}>
-                      {grandPending === 0 ? "-" : money(grandPending)}
-                    </td>
                   </tr>
                 </tbody>
               </table>
@@ -901,10 +851,9 @@ const ValueReport = () => {
 
         /* table */
         .val-table-wrap { overflow: auto; max-height: 640px; }
-        .val-table { width: 100%; min-width: 1500px; border-collapse: collapse; font-size: 13px; }
+        .val-table { width: 100%; min-width: 1300px; border-collapse: collapse; font-size: 13px; }
         .val-table th { position: sticky; top: 0; z-index: 2; background: #1e293b; color: #f1f5f9; font-size: 11.5px; font-weight: 600; letter-spacing: .05em;
           text-transform: uppercase; text-align: left; padding: 12px 12px; white-space: nowrap; }
-        .val-table th.bal { background: #be123c; }
         .val-table th.r, .val-table td.r { text-align: right; }
         .val-th { display: inline-flex; align-items: center; gap: 6px; }
         .val-table td { padding: 10px 12px; vertical-align: middle; white-space: nowrap; }
@@ -929,14 +878,9 @@ const ValueReport = () => {
         .val-avatar { width: 26px; height: 26px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
         .val-dash { color: #94a3b8; }
         .val-green { color: #15803d; }
-        .val-bold { font-weight: 700; }
         .val-table td.r { font-variant-numeric: tabular-nums; }
         .val-already { margin-top: 2px; font-size: 11px; font-weight: 500; color: #94a3b8; cursor: pointer; text-decoration: underline; }
         .val-already:hover { color: #2563eb; }
-
-        .val-bal-due { color: #be123c; background: #fff1f2 !important; font-weight: 700; }
-        .val-bal-paid { background: #f0fdf4 !important; }
-        .val-paid { display: inline-flex; align-items: center; gap: 4px; color: #15803d; font-weight: 700; }
 
         .val-sub-row td { background: #f1f5f9; padding: 10px 12px; font-weight: 700; color: #1e293b; }
         .val-sub-row td:first-child { font-size: 12px; letter-spacing: .05em; text-transform: uppercase; color: #64748b; }
@@ -956,7 +900,7 @@ const ValueReport = () => {
           .val-table { min-width: 0; font-size: 10px; }
           .val-table th { position: static; }
           .val-row, .val-sub-row { break-inside: avoid; }
-          .val-table th, .val-grand-row td, .val-date-row td, .val-row-adv td, .val-bal-due { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          .val-table th, .val-grand-row td, .val-date-row td, .val-row-adv td { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         }
       `}</style>
     </div>
