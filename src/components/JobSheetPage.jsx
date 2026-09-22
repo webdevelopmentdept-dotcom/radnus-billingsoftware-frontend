@@ -988,6 +988,7 @@ const today = new Date().toLocaleDateString("en-CA");
   const initialIncomeRef = React.useRef(0);
    const spareBaselineRef = React.useRef(0);
    const advanceBaselineRef = React.useRef(0);   // ✅ NEW
+     const othersBaselineRef = React.useRef(0);    // ✅ NEW
   const [repairDate, setRepairDate] = useState(today);
   const [deliveryDate, setDeliveryDate] = useState("");
   const [remarks, setRemarks] = useState("");
@@ -1141,6 +1142,7 @@ const today = new Date().toLocaleDateString("en-CA");
   spareCharge: Number(spareCharge || 0),
   spareBaseline: spareBaselineRef.current,   // 👈 இந்த ஒரு line add பண்ணு
     advanceBaseline: advanceBaselineRef.current, 
+    othersBaseline: othersBaselineRef.current,   // ✅ NEW
   income: incomeNum,
   incomeDate: finalIncomeDate,
 
@@ -1324,6 +1326,7 @@ const today = new Date().toLocaleDateString("en-CA");
        setSpareItems([]);
     spareBaselineRef.current = 0;
     advanceBaselineRef.current = 0;   // ✅ NEW
+    othersBaselineRef.current = 0;    // ✅ NEW
     setIncome("");
     setIncomeDate("");
     setIncomeDateTouched(false); // reset manual-pick flag on New
@@ -1405,6 +1408,7 @@ const today = new Date().toLocaleDateString("en-CA");
     // total to count as "current cycle" instead of just the new spares.
     spareBaselineRef.current = Number(editData.service?.spareBaseline || 0);
     advanceBaselineRef.current = Number(editData.service?.advanceBaseline || 0); 
+     othersBaselineRef.current = Number(editData.service?.othersBaseline || 0);
     setOthersAmount(editData.service?.othersAmount || "");
     setOthersItems(editData.service?.othersItems || []);
     setIncome(editData.service?.income || "");
@@ -2434,14 +2438,17 @@ const today = new Date().toLocaleDateString("en-CA");
     />
   </Field>
 </div>
-
                       <div className="col-md-6">
                         <Field label="Other Expenses">
                           <input
                             type="text"
                             className="form-control form-control-sm"
                             placeholder="Tap to add"
-                            value={othersAmount}
+                            value={
+                              Math.max(0, Number(othersAmount || 0) - othersBaselineRef.current) > 0
+                                ? Math.max(0, Number(othersAmount || 0) - othersBaselineRef.current)
+                                : ""
+                            }
                             readOnly
                             onClick={() => setShowOthersPopup(true)}
                             style={{ cursor: "pointer", background: "#f8f9fa" }}
@@ -2453,7 +2460,6 @@ const today = new Date().toLocaleDateString("en-CA");
                           </div>
                         )}
                       </div>
-
                      <div className="col-md-6">
   <Field label="Advance Amount ">
     <input
@@ -2790,6 +2796,7 @@ const today = new Date().toLocaleDateString("en-CA");
               setOthersAmount={setOthersAmount}
               setOthersItems={setOthersItems}
               existingItems={othersItems}
+                  othersBaselineAmount={othersBaselineRef.current}   // ✅ NEW
               referenceData={{ income, service: serviceCharge, spare: spareCharge, advance: advanceAmount }}
             />
           )}
@@ -2899,19 +2906,30 @@ const today = new Date().toLocaleDateString("en-CA");
                   const res = await axios.put(`${API}/api/jobsheets/${localEditData._id}/rebill`, {
                     rebilledBy: user?.username || "admin",
                   });
-                                 setLocalEditData(res.data);
+                                                       setLocalEditData(res.data);
                   setMobileStatus("Received");
                   setServiceCharge("");
                   setSpareItems(res.data.spareItems || []);
                   spareBaselineRef.current = (res.data.spareItems || [])
                     .reduce((s, it) => s + Number(it.amount || 0), 0);
+                    
                     advanceBaselineRef.current = Number(res.data.service?.advanceBaseline || 0);  
+
+                  // ✅ FIX — compute baseline directly from the items array (like Spare does),
+                  // instead of trusting the stored "othersBaseline" number from the server.
+                  const othersItemsFromServer = res.data.service?.othersItems || [];
+                  othersBaselineRef.current = othersItemsFromServer
+                    .reduce((s, it) => s + Number(it.amount || 0), 0);
+
                   setRemarks("");
                   setIncome("");
                   setIncomeDate("");
                   setIncomeDateTouched(false);
-                  setOthersAmount("");
-                  setOthersItems(res.data.service?.othersItems || []);
+                  // ✅ FIX — must equal the baseline, NOT "". Others has no auto-sync
+                  // useEffect like Spare's spareCharge, so leaving this "" would wipe
+                  // DB's othersAmount to 0 on the very next Update.
+                  setOthersAmount(String(othersBaselineRef.current));
+                  setOthersItems(othersItemsFromServer);
                   showToast(`Rebill #${rebillCount} opened! Add new charges and generate invoice.`, "success");
                   fetchJobStats();
                 } catch (err) {

@@ -1,15 +1,18 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
+
 const RebillReportPage = () => {
-  const [data,         setData]         = useState([]);
-  const [filtered,     setFiltered]     = useState([]);
-  const [search,       setSearch]       = useState("");
-  const [fromDate,     setFromDate]     = useState("");
-  const [toDate,       setToDate]       = useState("");
-  const [loading,      setLoading]      = useState(false);
-  const [expandedId,   setExpandedId]   = useState(null);
+  const [data,           setData]           = useState([]);
+  const [filtered,       setFiltered]       = useState([]);
+  const [search,         setSearch]         = useState("");
+  const [repFilter,      setRepFilter]      = useState("");
+  const [dateFilterType, setDateFilterType] = useState("created"); // "created" | "rebilled"
+  const [fromDate,       setFromDate]       = useState("");
+  const [toDate,         setToDate]         = useState("");
+  const [loading,        setLoading]        = useState(false);
+  const [expandedId,     setExpandedId]     = useState(null);
 
   const API      = import.meta.env.VITE_API_URL;
   const navigate = useNavigate();
@@ -35,6 +38,40 @@ const RebillReportPage = () => {
 
   useEffect(() => { fetchData(); }, []);
 
+  // Service Rep dropdown options (data-la irukkura reps)
+  const repOptions = useMemo(() => {
+    const set = new Set();
+    data.forEach((j) => { if (j.service?.serviceRep) set.add(j.service.serviceRep); });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [data]);
+
+  /* ================= DATE MATCH =================
+     "created"  → job.createdAt (single date, job created on this day)
+     "rebilled" → ANY entry in job.rebillHistory[].rebilledAt falls in range
+                  (a job can be rebilled more than once; if ANY cycle's
+                  rebill happened inside From/To, the job matches). */
+  const matchesDateFilter = (item) => {
+    if (!fromDate && !toDate) return true;
+
+    const inRange = (d) => {
+      if (!d) return false;
+      if (fromDate && toDate) return d >= fromDate && d <= toDate;
+      if (fromDate) return d >= fromDate;
+      if (toDate)   return d <= toDate;
+      return true;
+    };
+
+    if (dateFilterType === "rebilled") {
+      const rebillDates = (item.rebillHistory || [])
+        .map(rb => rb.rebilledAt ? new Date(rb.rebilledAt).toISOString().slice(0, 10) : null)
+        .filter(Boolean);
+      return rebillDates.some(inRange);
+    }
+
+    const created = item.createdAt ? new Date(item.createdAt).toISOString().slice(0, 10) : null;
+    return inRange(created);
+  };
+
   /* ── FILTER ── */
   const applyFilter = () => {
     let f = [...data];
@@ -43,16 +80,24 @@ const RebillReportPage = () => {
       f = f.filter(item =>
         item.customer?.name?.toLowerCase().includes(q) ||
         item.customer?.contact?.includes(q) ||
-        item.jobSheetNo?.toLowerCase().includes(q)
+        item.jobSheetNo?.toLowerCase().includes(q) ||
+        item.service?.serviceRep?.toLowerCase().includes(q)
       );
     }
-    if (fromDate) {
-      f = f.filter(item => {
-        const d = new Date(item.createdAt).toISOString().slice(0, 10);
-        return toDate ? (d >= fromDate && d <= toDate) : d === fromDate;
-      });
+    if (repFilter) {
+      f = f.filter(item => item.service?.serviceRep === repFilter);
     }
+    f = f.filter(matchesDateFilter);
     setFiltered(f);
+  };
+
+  const handleReset = () => {
+    setSearch("");
+    setRepFilter("");
+    setDateFilterType("created");
+    setFromDate("");
+    setToDate("");
+    fetchData();
   };
 
   const fmtDate = (d) =>
@@ -75,13 +120,6 @@ const RebillReportPage = () => {
     return map[s] || { bg: "#F3F4F6", color: "#374151" };
   };
 
-  /* ================= TOTALS (FIX) =================
-     🔴 PREVIOUSLY: added serviceCharge + spareCharge together as "Total".
-     But Income ₹ already IS the full collected amount for a cycle — Service
-     Charge is auto-derived as (Income − Spare − Others), same rule
-     ValueReport.jsx uses. Adding Service + Spare on top of that double-counts
-     money that's already inside Income. Now every total below is Income-based,
-     which is the true "money collected" figure per cycle. */
   const totalRebills = filtered.reduce((sum, j) => sum + (j.rebillHistory?.length || 0), 0);
 
   const totalRevenue = filtered.reduce((sum, j) => {
@@ -90,54 +128,59 @@ const RebillReportPage = () => {
     return sum + histIncome + currIncome;
   }, 0);
 
-const handleExcel = () => {
-  const rows = [];
+  const handleExcel = () => {
+    const rows = [];
 
-  filtered.forEach((job) => {
-    // each past ("before rebill") cycle as a row
-    (job.rebillHistory || []).forEach((rb, ri) => {
+    filtered.forEach((job) => {
+      (job.rebillHistory || []).forEach((rb, ri) => {
+        rows.push({
+          "Job No":         job.jobSheetNo,
+          "Customer":       job.customer?.name    || "-",
+          "Contact":        job.customer?.contact || "-",
+          "Device":         [job.device?.make, job.device?.model].filter(Boolean).join(" ") || "-",
+          "Service Rep":    job.service?.serviceRep || "-",
+          "Engineer":       job.service?.engineer || "-",
+          "Cycle":          `Before Rebill #${ri + 1}`,
+          "Income ₹":       rb.income        || 0,
+          "Service ₹":      rb.serviceCharge || 0,
+          "Spare ₹":        rb.spareCharge   || 0,
+          "Others ₹":       rb.othersAmount  || 0,
+          "Status at time": rb.status     || "-",
+          "Remarks":        rb.remarks    || "-",
+          "Rebilled By":    rb.rebilledBy || "-",
+          "Rebilled At":    fmtDate(rb.rebilledAt),
+          "Created At":     fmtDate(job.createdAt),
+        });
+      });
+
       rows.push({
         "Job No":         job.jobSheetNo,
         "Customer":       job.customer?.name    || "-",
         "Contact":        job.customer?.contact || "-",
         "Device":         [job.device?.make, job.device?.model].filter(Boolean).join(" ") || "-",
+        "Service Rep":    job.service?.serviceRep || "-",
         "Engineer":       job.service?.engineer || "-",
-        "Cycle":          `Before Rebill #${ri + 1}`,
-        "Income ₹":       rb.income        || 0,
-        "Service ₹":      rb.serviceCharge || 0,
-        "Spare ₹":        rb.spareCharge   || 0,
-        "Others ₹":       rb.othersAmount  || 0,
-        "Status at time": rb.status     || "-",
-        "Remarks":        rb.remarks    || "-",
-        "Rebilled By":    rb.rebilledBy || "-",
-        "Rebilled At":    fmtDate(rb.rebilledAt),
+        "Cycle":          `Current (After Rebill #${(job.rebillHistory?.length || 0)})`,
+        "Income ₹":       job.service?.income       || 0,
+        "Service ₹":      job.service?.serviceCharge || 0,
+        "Spare ₹":        Math.max(0, Number(job.service?.spareCharge || 0) - Number(job.service?.spareBaseline || 0)),
+        "Others ₹":       job.service?.othersAmount  || 0,
+        "Status at time": job.device?.mobileStatus || "-",
+        "Remarks":        job.service?.remarks || "-",
+        "Rebilled By":    "-",
+        "Rebilled At":    "-",
+        "Created At":     fmtDate(job.createdAt),
       });
     });
 
-    // current (active / after-rebill) cycle as the last row
-    rows.push({
-      "Job No":         job.jobSheetNo,
-      "Customer":       job.customer?.name    || "-",
-      "Contact":        job.customer?.contact || "-",
-      "Device":         [job.device?.make, job.device?.model].filter(Boolean).join(" ") || "-",
-      "Engineer":       job.service?.engineer || "-",
-      "Cycle":          `Current (After Rebill #${(job.rebillHistory?.length || 0)})`,
-      "Income ₹":       job.service?.income       || 0,
-      "Service ₹":      job.service?.serviceCharge || 0,
-      "Spare ₹":        Math.max(0, Number(job.service?.spareCharge || 0) - Number(job.service?.spareBaseline || 0)),
-      "Others ₹":       job.service?.othersAmount  || 0,
-      "Status at time": job.device?.mobileStatus || "-",
-      "Remarks":        job.service?.remarks || "-",
-      "Rebilled By":    "-",
-      "Rebilled At":    "-",
-    });
-  });
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Rebill Report");
+    XLSX.writeFile(wb, `Rebill_Report_${new Date().toLocaleDateString("en-GB").replace(/\//g, "-")}.xlsx`);
+  };
 
-  const ws = XLSX.utils.json_to_sheet(rows);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Rebill Report");
-  XLSX.writeFile(wb, `Rebill_Report_${new Date().toLocaleDateString("en-GB").replace(/\//g, "-")}.xlsx`);
-};
+  const dateTypeLabel = dateFilterType === "rebilled" ? "Rebilled Date" : "Created Date";
+
   return (
     <div style={{ minHeight: "100vh", background: "#f1f5f9", fontFamily: "'Segoe UI', sans-serif" }}>
       <style>{`
@@ -159,20 +202,20 @@ const handleExcel = () => {
             <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, color: "#0f172a" }}>🔄 Rebill Report</h1>
             <p style={{ margin: "4px 0 0", fontSize: 13, color: "#64748b" }}>Jobs that were reopened and rebilled after invoice — Income/Service/Spare/Others shown before & after each rebill</p>
           </div>
-  <div className="no-print" style={{ display: "flex", gap: 8 }}>
-  <button onClick={() => navigate(-1)}
-    style={{ background: "#f1f5f9", color: "#475569", border: "1.5px solid #e2e8f0", borderRadius: 8, padding: "7px 16px", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>
-    ← Back
-  </button>
-  <button onClick={() => window.print()}
-    style={{ background: "#10b981", color: "#fff", border: "none", borderRadius: 8, padding: "7px 16px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
-    🖨️ Print
-  </button>
-  <button onClick={handleExcel}
-    style={{ background: "#6366f1", color: "#fff", border: "none", borderRadius: 8, padding: "7px 16px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
-    ⬇ Excel
-  </button>
-</div>
+          <div className="no-print" style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => navigate(-1)}
+              style={{ background: "#f1f5f9", color: "#475569", border: "1.5px solid #e2e8f0", borderRadius: 8, padding: "7px 16px", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>
+              ← Back
+            </button>
+            <button onClick={() => window.print()}
+              style={{ background: "#10b981", color: "#fff", border: "none", borderRadius: 8, padding: "7px 16px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
+              🖨️ Print
+            </button>
+            <button onClick={handleExcel}
+              style={{ background: "#6366f1", color: "#fff", border: "none", borderRadius: 8, padding: "7px 16px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
+              ⬇ Excel
+            </button>
+          </div>
         </div>
 
         {/* SUMMARY CARDS */}
@@ -194,7 +237,21 @@ const handleExcel = () => {
         <div className="no-print" style={{ background: "#fff", borderRadius: 14, padding: "14px 20px", marginBottom: 20, boxShadow: "0 1px 4px rgba(0,0,0,0.06)", display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-end" }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <label style={{ fontSize: 11, color: "#64748b", fontWeight: 600, textTransform: "uppercase" }}>Search</label>
-            <input className="filter-in" placeholder="Job No / Name / Contact" value={search} onChange={e => setSearch(e.target.value)} style={{ width: 200 }} />
+            <input className="filter-in" placeholder="Job No / Name / Contact / Rep" value={search} onChange={e => setSearch(e.target.value)} style={{ width: 220 }} />
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <label style={{ fontSize: 11, color: "#64748b", fontWeight: 600, textTransform: "uppercase" }}>Service Rep</label>
+            <select className="filter-in" value={repFilter} onChange={e => setRepFilter(e.target.value)} style={{ minWidth: 140 }}>
+              <option value="">All Reps</option>
+              {repOptions.map((r) => (<option key={r} value={r}>{r}</option>))}
+            </select>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <label style={{ fontSize: 11, color: "#64748b", fontWeight: 600, textTransform: "uppercase" }}>Date Type</label>
+            <select className="filter-in" value={dateFilterType} onChange={e => setDateFilterType(e.target.value)} style={{ minWidth: 150 }}>
+              <option value="created">Created Date</option>
+              <option value="rebilled">Rebilled Date</option>
+            </select>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <label style={{ fontSize: 11, color: "#64748b", fontWeight: 600, textTransform: "uppercase" }}>From</label>
@@ -208,7 +265,7 @@ const handleExcel = () => {
             style={{ background: "#6366f1", color: "#fff", border: "none", borderRadius: 8, padding: "9px 22px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
             🔍 Filter
           </button>
-          <button onClick={fetchData}
+          <button onClick={handleReset}
             style={{ background: "#f1f5f9", color: "#475569", border: "1.5px solid #e2e8f0", borderRadius: 8, padding: "9px 16px", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>
             🔄 Reset
           </button>
@@ -217,10 +274,12 @@ const handleExcel = () => {
         {/* TABLE */}
         <div style={{ background: "#fff", borderRadius: 14, boxShadow: "0 1px 6px rgba(0,0,0,0.07)", overflow: "hidden", border: "1px solid #e2e8f0" }}>
 
-          {/* Table header info */}
-          <div style={{ padding: "12px 20px", background: "#f8fafc", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ padding: "12px 20px", background: "#f8fafc", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
             <span style={{ fontSize: 13, fontWeight: 600, color: "#475569" }}>
               {filtered.length} job{filtered.length !== 1 ? "s" : ""} found
+              {(fromDate || toDate) && (
+                <span style={{ color: "#94a3b8", fontWeight: 500 }}> — filtered by {dateTypeLabel}</span>
+              )}
             </span>
             <span style={{ fontSize: 12, color: "#94a3b8" }}>Click a row to see rebill history (before/after amounts)</span>
           </div>
@@ -234,7 +293,7 @@ const handleExcel = () => {
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <thead>
                   <tr style={{ background: "#f1f5f9", color: "#475569" }}>
-                    {["#", "Job No", "Customer", "Contact", "Device", "Engineer", "Status", "Rebills", "Current Income ₹", "Lifetime Income ₹"].map((h, i) => (
+                    {["#", "Job No", "Customer", "Contact", "Device", "Service Rep", "Engineer", "Status", "Rebills", "Current Income ₹", "Lifetime Income ₹"].map((h, i) => (
                       <th key={i} style={{ padding: "10px 12px", textAlign: "left", fontWeight: 600, borderBottom: "1px solid #e2e8f0", whiteSpace: "nowrap" }}>{h}</th>
                     ))}
                   </tr>
@@ -243,13 +302,10 @@ const handleExcel = () => {
                   {filtered.map((job, idx) => {
                     const ss        = statusStyle(job.device?.mobileStatus);
                     const rebills   = job.rebillHistory?.length || 0;
-                    // ✅ FIX — Income-based totals (avoids double-counting Service+Spare,
-                    // since Service Charge is already derived FROM Income).
                     const histIncome = job.rebillHistory?.reduce((s, r) => s + Number(r.income || 0), 0) || 0;
                     const currIncome = Number(job.service?.income || 0);
                     const allTimeIncome = histIncome + currIncome;
-                                      const isExpanded = expandedId === job._id;
-                    // ✅ NEW — spareCharge is cumulative; subtract baseline for this cycle's own spare.
+                    const isExpanded = expandedId === job._id;
                     const currentCycleSpare = Math.max(
                       0,
                       Number(job.service?.spareCharge || 0) - Number(job.service?.spareBaseline || 0)
@@ -268,6 +324,7 @@ const handleExcel = () => {
                           <td style={{ padding: "10px 12px", fontWeight: 600, color: "#0f172a" }}>{job.customer?.name || "-"}</td>
                           <td style={{ padding: "10px 12px", color: "#475569" }}>{job.customer?.contact || "-"}</td>
                           <td style={{ padding: "10px 12px", color: "#64748b" }}>{job.device?.make} {job.device?.model}</td>
+                          <td style={{ padding: "10px 12px", color: "#475569", fontWeight: 600 }}>{job.service?.serviceRep || "-"}</td>
                           <td style={{ padding: "10px 12px", color: "#475569" }}>{job.service?.engineer || "-"}</td>
                           <td style={{ padding: "10px 12px" }}>
                             <span style={{ background: ss.bg, color: ss.color, fontSize: 11, fontWeight: 700, padding: "2px 9px", borderRadius: 20 }}>
@@ -283,10 +340,10 @@ const handleExcel = () => {
                           <td style={{ padding: "10px 12px", fontWeight: 700, color: "#6366f1" }}>{fmtCurrency(allTimeIncome)}</td>
                         </tr>
 
-                        {/* EXPANDED — REBILL HISTORY (Before → After, cycle by cycle) */}
+                        {/* EXPANDED — REBILL HISTORY */}
                         {isExpanded && (
                           <tr>
-                            <td colSpan={10} style={{ padding: "0 12px 12px 48px", background: "#f0f9ff" }}>
+                            <td colSpan={11} style={{ padding: "0 12px 12px 48px", background: "#f0f9ff" }}>
                               <div style={{ fontSize: 12, fontWeight: 700, color: "#1e40af", marginBottom: 8, marginTop: 8 }}>
                                 📋 Rebill history for {job.jobSheetNo} — each block shows Income / Service / Spare / Others for that cycle
                               </div>
@@ -301,7 +358,6 @@ const handleExcel = () => {
                                       <span style={{ background: "#dbeafe", color: "#1d4ed8", fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 12 }}>
                                         Before Rebill #{ri + 1}
                                       </span>
-                                      {/* ✅ NEW — date shown right next to the cycle badge */}
                                       <span style={{ color: "#94a3b8", fontSize: 11, fontWeight: 600 }}>
                                         {fmtDate(rb.rebilledAt)}
                                       </span>
@@ -329,7 +385,6 @@ const handleExcel = () => {
                                       )}
                                     </div>
                                     <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-                                      {/* date moved next to the badge above; only "by" stays here */}
                                       <span style={{ fontSize: 11, color: "#64748b" }}>by <b>{rb.rebilledBy}</b></span>
                                     </div>
                                   </div>
