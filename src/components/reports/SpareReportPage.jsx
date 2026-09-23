@@ -4,7 +4,7 @@ import * as XLSX from "xlsx";
 import {
   Wrench, Search, User, Users, CalendarDays, RotateCcw, Printer,
   FileSpreadsheet, FileText, Package, Boxes, IndianRupee, Loader2, Inbox,
-  Phone, Filter, Hash, Tag,
+  Phone, Filter, Hash, Tag, Activity,
 } from "lucide-react";
 
 const API = import.meta.env.VITE_API_URL;
@@ -16,7 +16,13 @@ const fmtDMY = (ymd) => (ymd ? ymd.split("-").reverse().join("-") : "—");
 const money = (n) =>
   `₹${Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-const emptyFilters = () => ({ q: "", rep: "", from: todayStr(), to: todayStr() });
+const emptyFilters = () => ({ q: "", rep: "", status: "", from: todayStr(), to: todayStr() });
+
+/* Fixed status list — app-oda Device Status dropdown-ku match aagurathu */
+const STATUS_LIST = ["Received", "Pending", "Repaired", "Delivered", "Delivered NR/NA", "Cancelled"];
+
+/* device.mobileStatus field-la irundhu current status eduthukka */
+const getCurrentStatus = (job) => job.device?.mobileStatus || "";
 
 /* Rep name-ku fixed color — same rep-ku eppovum same color */
 const REP_COLORS = [
@@ -34,6 +40,17 @@ const repColor = (name = "") => {
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
   return REP_COLORS[h % REP_COLORS.length];
 };
+
+/* Status name-ku fixed color */
+const STATUS_COLORS = {
+  Received: { bg: "#e0f2fe", fg: "#0369a1" },
+  Pending: { bg: "#fef9c3", fg: "#a16207" },
+  Repaired: { bg: "#dcfce7", fg: "#15803d" },
+  Delivered: { bg: "#d1fae5", fg: "#047857" },
+  "Delivered NR/NA": { bg: "#e2e8f0", fg: "#475569" },
+  Cancelled: { bg: "#fecaca", fg: "#991b1b" },
+};
+const statusColor = (name = "") => STATUS_COLORS[name] || { bg: "#f1f5f9", fg: "#475569" };
 
 const TONES = {
   blue: { bg: "#dbeafe", fg: "#2563eb" },
@@ -100,6 +117,8 @@ const SpareReportPage = () => {
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [rawData]);
 
+  const statusOptions = STATUS_LIST;
+
   /* ===== Filter + group by date ===== */
   const { groupedData, grandTotal, jobCount, entryCount, totalQty } = useMemo(() => {
     const grouped = {};
@@ -114,6 +133,7 @@ const SpareReportPage = () => {
       const name = item.customer?.name || "";
       const contact = item.customer?.contact || "";
       const serviceRep = item.service?.serviceRep || "";
+      const status = getCurrentStatus(item);
       const repairDate = toYMD(item.service?.repairDate);
 
       // search: Job Sheet No / Name / Contact / Service Rep
@@ -123,6 +143,8 @@ const SpareReportPage = () => {
       }
       // service rep dropdown filter
       if (applied.rep && serviceRep !== applied.rep) return;
+      // status dropdown filter
+      if (applied.status && status !== applied.status) return;
 
       (item.spareItems || []).forEach((si) => {
         const amt = Number(si.amount || 0);
@@ -133,7 +155,7 @@ const SpareReportPage = () => {
 
         if (!grouped[d]) grouped[d] = [];
         grouped[d].push({
-          jobSheetNo, name, contact, serviceRep,
+          jobSheetNo, name, contact, serviceRep, status,
           spare: si.name, qty: si.qty, rate: si.rate, amount: amt,
         });
         gTotal += amt;
@@ -164,6 +186,7 @@ const SpareReportPage = () => {
           "Customer": item.name,
           "Contact": item.contact,
           "Service Rep": item.serviceRep,
+          "Status": item.status,
           "Spare": item.spare,
           "Qty": item.qty,
           "Rate": item.rate,
@@ -236,6 +259,20 @@ const SpareReportPage = () => {
               </div>
             </Field>
 
+            <Field label="Status" icon={Activity} className="spr-f-rep">
+              <div className="spr-input-wrap">
+                <Activity size={16} className="spr-input-icon" />
+                <select
+                  className="spr-input has-icon"
+                  value={filters.status}
+                  onChange={(e) => setFilters({ ...filters, status: e.target.value })}
+                >
+                  <option value="">All Status</option>
+                  {statusOptions.map((s) => (<option key={s} value={s}>{s}</option>))}
+                </select>
+              </div>
+            </Field>
+
             <Field label="From" icon={CalendarDays} className="spr-f-date">
               <input
                 type="date"
@@ -290,6 +327,11 @@ const SpareReportPage = () => {
                   <User size={12} /> {applied.rep}
                 </span>
               )}
+              {applied.status && (
+                <span className="spr-chip" style={{ background: statusColor(applied.status).bg, color: statusColor(applied.status).fg }}>
+                  <Activity size={12} /> {applied.status}
+                </span>
+              )}
               {applied.q && (
                 <span className="spr-chip" style={{ background: "#f5f3ff", color: "#6d28d9" }}>
                   <Search size={12} /> "{applied.q}"
@@ -307,7 +349,7 @@ const SpareReportPage = () => {
             <div className="spr-empty">
               <div className="spr-empty-icon"><Inbox size={30} /></div>
               <div className="spr-empty-title">No records found</div>
-              <div className="spr-empty-sub">Date range / Service Rep maathi try pannunga</div>
+              <div className="spr-empty-sub">Date range / Service Rep / Status maathi try pannunga</div>
             </div>
           ) : (
             <div className="spr-table-wrap">
@@ -318,6 +360,7 @@ const SpareReportPage = () => {
                     <th><span className="spr-th"><Hash size={13} /> Job Sheet</span></th>
                     <th><span className="spr-th"><User size={13} /> Customer</span></th>
                     <th><span className="spr-th"><Users size={13} /> Service Rep</span></th>
+                    <th><span className="spr-th"><Activity size={13} /> Status</span></th>
                     <th><span className="spr-th"><Wrench size={13} /> Spare</span></th>
                     <th className="c"><span className="spr-th"><Boxes size={13} /> Qty</span></th>
                     <th className="r"><span className="spr-th"><Tag size={13} /> Rate</span></th>
@@ -331,7 +374,7 @@ const SpareReportPage = () => {
                     return (
                       <React.Fragment key={date}>
                         <tr className="spr-date-row">
-                          <td colSpan="8">
+                          <td colSpan="9">
                             <div className="spr-date-cell">
                               <CalendarDays size={16} />
                               {fmtDMY(date)}
@@ -344,6 +387,7 @@ const SpareReportPage = () => {
 
                         {records.map((item, i) => {
                           const rc = repColor(item.serviceRep);
+                          const sc = statusColor(item.status);
                           return (
                             <tr key={i} className="spr-row">
                               <td className="c" style={{ color: "#94a3b8" }}>{i + 1}</td>
@@ -366,6 +410,15 @@ const SpareReportPage = () => {
                                   <span style={{ color: "#94a3b8" }}>-</span>
                                 )}
                               </td>
+                              <td>
+                                {item.status ? (
+                                  <span className="spr-status" style={{ background: sc.bg, color: sc.fg }}>
+                                    {item.status}
+                                  </span>
+                                ) : (
+                                  <span style={{ color: "#94a3b8" }}>-</span>
+                                )}
+                              </td>
                               <td style={{ color: "#334155", fontWeight: 500 }}>{item.spare || "-"}</td>
                               <td className="c"><span className="spr-qty">{item.qty ?? "-"}</span></td>
                               <td className="r" style={{ color: "#475569" }}>{money(item.rate)}</td>
@@ -375,7 +428,7 @@ const SpareReportPage = () => {
                         })}
 
                         <tr className="spr-sub-row">
-                          <td colSpan="7" className="r">Sub Total</td>
+                          <td colSpan="8" className="r">Sub Total</td>
                           <td className="r spr-amt">{money(subTotal)}</td>
                         </tr>
                       </React.Fragment>
@@ -385,7 +438,7 @@ const SpareReportPage = () => {
 
                 <tfoot>
                   <tr className="spr-grand-row">
-                    <td colSpan="7" className="r">Grand Total</td>
+                    <td colSpan="8" className="r">Grand Total</td>
                     <td className="r">{money(grandTotal)}</td>
                   </tr>
                 </tfoot>
@@ -417,7 +470,7 @@ const SpareReportPage = () => {
         /* filter row */
         .spr-filter-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px; }
         .spr-f-search { flex: 2 1 260px; }
-        .spr-f-rep { flex: 1 1 190px; }
+        .spr-f-rep { flex: 1 1 170px; }
         .spr-f-date { flex: 1 1 150px; }
         .spr-f-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }
         .spr-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
@@ -467,7 +520,7 @@ const SpareReportPage = () => {
 
         /* table */
         .spr-table-wrap { overflow-x: auto; }
-        .spr-table { width: 100%; min-width: 980px; border-collapse: collapse; font-size: 14px; }
+        .spr-table { width: 100%; min-width: 1080px; border-collapse: collapse; font-size: 14px; }
         .spr-table th { background: #1e293b; color: #f1f5f9; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; text-align: left; padding: 12px 16px; }
         .spr-table th.c, .spr-table td.c { text-align: center; }
         .spr-table th.r, .spr-table td.r { text-align: right; }
@@ -483,6 +536,7 @@ const SpareReportPage = () => {
         .spr-contact { display: flex; align-items: center; gap: 4px; margin-top: 2px; font-size: 12px; color: #64748b; }
         .spr-rep { display: inline-flex; align-items: center; gap: 8px; font-weight: 500; color: #334155; }
         .spr-avatar { width: 28px; height: 28px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
+        .spr-status { display: inline-block; padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; white-space: nowrap; }
         .spr-qty { display: inline-block; min-width: 28px; padding: 2px 8px; border-radius: 6px; background: #fff7ed; color: #c2410c; font-size: 12px; font-weight: 700; text-align: center; }
         .spr-amt { font-weight: 700; color: #1e293b; font-variant-numeric: tabular-nums; }
         .spr-sub-row td { background: #f8fafc; padding: 10px 16px; font-weight: 700; color: #1e293b; }
