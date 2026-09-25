@@ -4,7 +4,7 @@ import * as XLSX from "xlsx";
 import {
   Wallet, Search, User, Users, CalendarDays, RotateCcw, Printer,
   FileSpreadsheet, FileText, Receipt, IndianRupee, Loader2, Inbox,
-  Phone, Filter, Hash, Tag,
+  Phone, Filter, Hash, Tag, Layers,
 } from "lucide-react";
 
 const API = import.meta.env.VITE_API_URL;
@@ -16,7 +16,10 @@ const fmtDMY = (ymd) => (ymd ? ymd.split("-").reverse().join("-") : "—");
 const money = (n) =>
   `₹${Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-const emptyFilters = () => ({ q: "", rep: "", from: todayStr(), to: todayStr() });
+/* ✅ CHANGED — Entry Type is now just a FILTER (Both / Advance / Balance), not a view switch.
+   The table itself always shows BOTH "Advance ₹" and "Balance ₹" as separate columns. */
+const emptyFilters = () => ({ q: "", rep: "", type: "Both", from: todayStr(), to: todayStr() });
+const TYPE_LIST = ["Both", "Advance", "Balance"];
 
 /* Rep name-ku fixed color — same rep-ku eppovum same color */
 const REP_COLORS = [
@@ -35,11 +38,20 @@ const repColor = (name = "") => {
   return REP_COLORS[h % REP_COLORS.length];
 };
 
+/* ✅ Type badge colors — used on each ROW now (Advance row / Balance row), not just the filter chip */
+const TYPE_COLORS = {
+  Advance: { bg: "#d1fae5", fg: "#047857" },
+  Balance: { bg: "#fef3c7", fg: "#b45309" },
+  Both: { bg: "#dbeafe", fg: "#1d4ed8" },
+};
+const typeColor = (name = "") => TYPE_COLORS[name] || { bg: "#f1f5f9", fg: "#475569" };
+
 const TONES = {
   blue: { bg: "#dbeafe", fg: "#2563eb" },
   violet: { bg: "#ede9fe", fg: "#7c3aed" },
   amber: { bg: "#fef3c7", fg: "#d97706" },
   green: { bg: "#d1fae5", fg: "#059669" },
+  teal: { bg: "#ccfbf1", fg: "#0f766e" },
 };
 
 /* ================= SMALL UI PARTS ================= */
@@ -100,14 +112,26 @@ const AdvanceReportPage = () => {
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [rawData]);
 
-  /* ===== Filter + group by date ===== */
-  const { groupedData, grandTotal, jobCount, entryCount, repCount } = useMemo(() => {
+  /* ===== Filter + group by date =====
+     ✅ CHANGED — instead of switching SOURCE based on applied.type, we now build a
+     single combined entry list: each entry carries entryType ("Advance" | "Balance"),
+     and the row renders BOTH "Advance ₹" and "Balance ₹" columns — only the matching
+     column is filled per row, the other shows "-". applied.type ("Both"/"Advance"/
+     "Balance") just filters WHICH entries get included, it no longer changes the
+     table shape. */
+  const {
+    groupedData, grandTotal, advanceTotal, balanceTotal,
+    jobCount, entryCount, repCount,
+  } = useMemo(() => {
     const grouped = {};
     const jobSet = new Set();
     const repSet = new Set();
-    let gTotal = 0;
+    let advTotal = 0;
+    let balTotal = 0;
     let entries = 0;
     const q = applied.q.trim().toLowerCase();
+    const wantAdvance = applied.type === "Both" || applied.type === "Advance";
+    const wantBalance = applied.type === "Both" || applied.type === "Balance";
 
     rawData.forEach((item) => {
       const jobSheetNo = item.jobSheetNo || "";
@@ -122,21 +146,45 @@ const AdvanceReportPage = () => {
       }
       if (applied.rep && serviceRep !== applied.rep) return;
 
-      const advanceItems = item.service?.advanceItems || [];
       const list = [];
 
-      if (advanceItems.length > 0) {
-        advanceItems.forEach((adv) => {
-          const amt = Number(adv.amount || 0);
-          if (amt > 0) list.push({ date: adv.date ? toYMD(adv.date) : repairDate, label: adv.label || "-", amount: amt });
-        });
-      } else {
-        const amt = Number(item.service?.advanceAmount || 0);
-        if (amt > 0) {
+      // ---- Advance entries ----
+      if (wantAdvance) {
+        const advanceItems = item.service?.advanceItems || [];
+        if (advanceItems.length > 0) {
+          advanceItems.forEach((adv) => {
+            const amt = Number(adv.amount || 0);
+            if (amt > 0) {
+              list.push({
+                entryType: "Advance",
+                date: adv.date ? toYMD(adv.date) : repairDate,
+                label: adv.label || "-",
+                amount: amt,
+              });
+            }
+          });
+        } else {
+          const amt = Number(item.service?.advanceAmount || 0);
+          if (amt > 0) {
+            list.push({
+              entryType: "Advance",
+              date: item.service?.advanceDate ? toYMD(item.service.advanceDate) : repairDate,
+              label: "-",
+              amount: amt,
+            });
+          }
+        }
+      }
+
+      // ---- Balance entry ----
+      if (wantBalance) {
+        const bal = Number(item.service?.balance || 0);
+        if (bal > 0) {
           list.push({
-            date: item.service?.advanceDate ? toYMD(item.service.advanceDate) : repairDate,
+            entryType: "Balance",
+            date: item.service?.balanceDate ? toYMD(item.service.balanceDate) : repairDate,
             label: "-",
-            amount: amt,
+            amount: bal,
           });
         }
       }
@@ -145,8 +193,12 @@ const AdvanceReportPage = () => {
         if (applied.from && e.date < applied.from) return;
         if (applied.to && e.date > applied.to) return;
         if (!grouped[e.date]) grouped[e.date] = [];
-        grouped[e.date].push({ jobSheetNo, name, contact, serviceRep, label: e.label, amount: e.amount });
-        gTotal += e.amount;
+        grouped[e.date].push({
+          jobSheetNo, name, contact, serviceRep,
+          entryType: e.entryType, label: e.label, amount: e.amount,
+        });
+        if (e.entryType === "Advance") advTotal += e.amount;
+        else balTotal += e.amount;
         entries += 1;
         jobSet.add(jobSheetNo);
         if (serviceRep) repSet.add(serviceRep);
@@ -156,7 +208,15 @@ const AdvanceReportPage = () => {
     const sorted = {};
     Object.keys(grouped).sort((a, b) => b.localeCompare(a)).forEach((k) => (sorted[k] = grouped[k]));
 
-    return { groupedData: sorted, grandTotal: gTotal, jobCount: jobSet.size, entryCount: entries, repCount: repSet.size };
+    return {
+      groupedData: sorted,
+      grandTotal: advTotal + balTotal,
+      advanceTotal: advTotal,
+      balanceTotal: balTotal,
+      jobCount: jobSet.size,
+      entryCount: entries,
+      repCount: repSet.size,
+    };
   }, [rawData, applied]);
 
   const hasRows = Object.keys(groupedData).length > 0;
@@ -174,15 +234,17 @@ const AdvanceReportPage = () => {
           "Customer": item.name,
           "Contact": item.contact,
           "Service Rep": item.serviceRep,
-          "Label": item.label,
-          "Amount": item.amount,
+          "Type": item.entryType,
+          "Label": item.entryType === "Advance" ? item.label : "-",
+          "Advance ₹": item.entryType === "Advance" ? item.amount : 0,
+          "Balance ₹": item.entryType === "Balance" ? item.amount : 0,
         });
       });
     });
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Advance Report");
-    XLSX.writeFile(wb, `Advance_Report_${new Date().toLocaleDateString("en-GB").replace(/\//g, "-")}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, "Advance & Balance Report");
+    XLSX.writeFile(wb, `Advance_Balance_Report_${new Date().toLocaleDateString("en-GB").replace(/\//g, "-")}.xlsx`);
   };
 
   return (
@@ -194,8 +256,10 @@ const AdvanceReportPage = () => {
           <div className="adv-header-left">
             <div className="adv-logo"><Wallet size={28} /></div>
             <div>
-              <h1 className="adv-title">Advance Report</h1>
-              <div className="adv-subtitle">Advance payments received — each entry shown on its own date</div>
+              <h1 className="adv-title">Advance &amp; Balance Report</h1>
+              <div className="adv-subtitle">
+                Advance payments &amp; pending balances — each entry shown on its own date
+              </div>
             </div>
           </div>
 
@@ -227,6 +291,21 @@ const AdvanceReportPage = () => {
                   onChange={(e) => setFilters({ ...filters, q: e.target.value })}
                   onKeyDown={(e) => { if (e.key === "Enter") loadReport(filters); }}
                 />
+              </div>
+            </Field>
+
+            {/* ✅ CHANGED — Entry Type now just FILTERS which rows show (table always
+                has both Advance ₹ / Balance ₹ columns) */}
+            <Field label="Entry Type" icon={Layers} className="adv-f-rep">
+              <div className="adv-input-wrap">
+                <Layers size={16} className="adv-input-icon" />
+                <select
+                  className="adv-input has-icon"
+                  value={filters.type}
+                  onChange={(e) => setFilters({ ...filters, type: e.target.value })}
+                >
+                  {TYPE_LIST.map((t) => (<option key={t} value={t}>{t}</option>))}
+                </select>
               </div>
             </Field>
 
@@ -277,9 +356,10 @@ const AdvanceReportPage = () => {
         {/* ============ STAT CARDS ============ */}
         <div className="adv-stats">
           <StatCard icon={FileText} label="Total Jobs" value={jobCount} tone={TONES.blue} />
-          <StatCard icon={Receipt} label="Advance Entries" value={entryCount} tone={TONES.violet} />
+          <StatCard icon={Receipt} label="Total Entries" value={entryCount} tone={TONES.violet} />
           <StatCard icon={Users} label="Service Reps" value={repCount} tone={TONES.amber} />
-          <StatCard icon={IndianRupee} label="Total Advance" value={money(grandTotal)} tone={TONES.green} />
+          <StatCard icon={IndianRupee} label="Total Advance" value={money(advanceTotal)} tone={TONES.green} />
+          <StatCard icon={IndianRupee} label="Total Balance" value={money(balanceTotal)} tone={TONES.teal} />
         </div>
 
         {/* ============ RESULT CARD ============ */}
@@ -287,9 +367,12 @@ const AdvanceReportPage = () => {
           <div className="adv-result-head">
             <div className="adv-result-title">
               <FileText size={18} color="#64748b" />
-              {jobCount} jobs <span style={{ color: "#cbd5e1" }}>|</span> {entryCount} advance entries
+              {jobCount} jobs <span style={{ color: "#cbd5e1" }}>|</span> {entryCount} entries
             </div>
             <div className="adv-chips">
+              <span className="adv-chip" style={{ background: typeColor(applied.type).bg, color: typeColor(applied.type).fg }}>
+                <Layers size={12} /> {applied.type}
+              </span>
               <span className="adv-chip" style={{ background: "#f1f5f9", color: "#475569" }}>
                 <CalendarDays size={12} /> {fmtDMY(applied.from)} → {fmtDMY(applied.to)}
               </span>
@@ -315,29 +398,33 @@ const AdvanceReportPage = () => {
             <div className="adv-empty">
               <div className="adv-empty-icon"><Inbox size={30} /></div>
               <div className="adv-empty-title">No records found</div>
-              <div className="adv-empty-sub">Date range / Service Rep maathi try pannunga</div>
+              <div className="adv-empty-sub">Date range / Entry Type / Service Rep maathi try pannunga</div>
             </div>
           ) : (
             <div className="adv-table-wrap">
               <table className="adv-table">
                 <thead>
                   <tr>
-                    <th className="c" style={{ width: 64 }}>SL</th>
+                    <th className="c" style={{ width: 56 }}>SL</th>
                     <th><span className="adv-th"><Hash size={13} /> Job Sheet</span></th>
                     <th><span className="adv-th"><User size={13} /> Customer</span></th>
                     <th><span className="adv-th"><Users size={13} /> Service Rep</span></th>
+                    <th className="c"><span className="adv-th"><Layers size={13} /> Type</span></th>
                     <th><span className="adv-th"><Tag size={13} /> Label</span></th>
-                    <th className="r"><span className="adv-th"><IndianRupee size={13} /> Amount</span></th>
+                    <th className="r"><span className="adv-th"><IndianRupee size={13} /> Advance ₹</span></th>
+                    <th className="r"><span className="adv-th"><IndianRupee size={13} /> Balance ₹</span></th>
                   </tr>
                 </thead>
 
                 <tbody>
                   {Object.entries(groupedData).map(([date, records]) => {
-                    const subTotal = records.reduce((sum, r) => sum + Number(r.amount), 0);
+                    const subAdvance = records.filter(r => r.entryType === "Advance").reduce((s, r) => s + Number(r.amount), 0);
+                    const subBalance = records.filter(r => r.entryType === "Balance").reduce((s, r) => s + Number(r.amount), 0);
+                    const colCount = 8;
                     return (
                       <React.Fragment key={date}>
                         <tr className="adv-date-row">
-                          <td colSpan="6">
+                          <td colSpan={colCount}>
                             <div className="adv-date-cell">
                               <CalendarDays size={16} />
                               {fmtDMY(date)}
@@ -350,6 +437,8 @@ const AdvanceReportPage = () => {
 
                         {records.map((item, i) => {
                           const rc = repColor(item.serviceRep);
+                          const tc = typeColor(item.entryType);
+                          const isAdv = item.entryType === "Advance";
                           return (
                             <tr key={i} className="adv-row">
                               <td className="c" style={{ color: "#94a3b8" }}>{i + 1}</td>
@@ -372,15 +461,22 @@ const AdvanceReportPage = () => {
                                   <span style={{ color: "#94a3b8" }}>-</span>
                                 )}
                               </td>
-                              <td style={{ color: "#475569" }}>{item.label}</td>
-                              <td className="r adv-amt">{money(item.amount)}</td>
+                              <td className="c">
+                                <span className="adv-typebadge" style={{ background: tc.bg, color: tc.fg }}>
+                                  {item.entryType}
+                                </span>
+                              </td>
+                              <td style={{ color: "#475569" }}>{isAdv ? item.label : "-"}</td>
+                              <td className="r adv-amt">{isAdv ? money(item.amount) : <span style={{ color: "#cbd5e1" }}>-</span>}</td>
+                              <td className="r adv-amt">{!isAdv ? money(item.amount) : <span style={{ color: "#cbd5e1" }}>-</span>}</td>
                             </tr>
                           );
                         })}
 
                         <tr className="adv-sub-row">
-                          <td colSpan="5" className="r">Sub Total</td>
-                          <td className="r adv-amt">{money(subTotal)}</td>
+                          <td colSpan={6} className="r">Sub Total</td>
+                          <td className="r adv-amt">{money(subAdvance)}</td>
+                          <td className="r adv-amt">{money(subBalance)}</td>
                         </tr>
                       </React.Fragment>
                     );
@@ -389,8 +485,9 @@ const AdvanceReportPage = () => {
 
                 <tfoot>
                   <tr className="adv-grand-row">
-                    <td colSpan="5" className="r">Grand Total</td>
-                    <td className="r">{money(grandTotal)}</td>
+                    <td colSpan={6} className="r">Grand Total</td>
+                    <td className="r">{money(advanceTotal)}</td>
+                    <td className="r">{money(balanceTotal)}</td>
                   </tr>
                 </tfoot>
               </table>
@@ -399,13 +496,12 @@ const AdvanceReportPage = () => {
         </div>
       </div>
 
-      {/* ============ SCOPED STYLES (Bootstrap-oda clash aagaadhu) ============ */}
+      {/* ============ SCOPED STYLES ============ */}
       <style>{`
         .adv-page, .adv-page * { box-sizing: border-box; }
         .adv-page { min-height: 100vh; background: #f1f5f9; padding: 24px 32px; color: #1e293b; }
-        .adv-container { max-width: 1400px; margin: 0 auto; }
+        .adv-container { max-width: 1500px; margin: 0 auto; }
 
-        /* header */
         .adv-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
         .adv-header-left { display: flex; align-items: center; gap: 16px; }
         .adv-header-actions { display: flex; align-items: center; gap: 8px; }
@@ -414,21 +510,18 @@ const AdvanceReportPage = () => {
         .adv-title { margin: 0; font-size: 28px; font-weight: 800; line-height: 1.2; letter-spacing: -0.3px; color: #1e293b; }
         .adv-subtitle { margin-top: 2px; font-size: 14px; color: #64748b; }
 
-        /* card */
         .adv-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; box-shadow: 0 1px 2px rgba(15,23,42,.05); }
         .adv-card-title { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; color: #334155; margin-bottom: 16px; }
 
-        /* filter row */
         .adv-filter-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px; }
         .adv-f-search { flex: 2 1 260px; }
-        .adv-f-rep { flex: 1 1 190px; }
+        .adv-f-rep { flex: 1 1 170px; }
         .adv-f-date { flex: 1 1 150px; }
         .adv-f-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }
         .adv-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
         .adv-label { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #64748b; line-height: 1; }
         .adv-label svg { flex-shrink: 0; }
 
-        /* inputs */
         .adv-input-wrap { position: relative; }
         .adv-input-icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #94a3b8; pointer-events: none; }
         .adv-input { display: block; width: 100%; height: 40px; padding: 0 12px; font-size: 14px; color: #1e293b; background: #fff;
@@ -437,7 +530,6 @@ const AdvanceReportPage = () => {
         .adv-input::placeholder { color: #94a3b8; }
         .adv-input:focus { border-color: #2563eb; box-shadow: 0 0 0 4px #dbeafe; }
 
-        /* buttons */
         .adv-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 40px; padding: 0 18px; font-size: 14px; font-weight: 600;
           border: 1px solid transparent; border-radius: 10px; cursor: pointer; white-space: nowrap; transition: background .15s, box-shadow .15s; font-family: inherit; line-height: 1; }
         .adv-btn:disabled { opacity: .55; cursor: not-allowed; }
@@ -448,20 +540,17 @@ const AdvanceReportPage = () => {
         .adv-btn-ghost { background: #fff; color: #334155; border-color: #cbd5e1; }
         .adv-btn-ghost:hover:not(:disabled) { background: #f8fafc; }
 
-        /* stat cards */
-        .adv-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 20px; }
+        .adv-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 20px; }
         .adv-stat { display: flex; align-items: center; gap: 14px; background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 16px; box-shadow: 0 1px 2px rgba(15,23,42,.05); }
         .adv-stat-icon { width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
         .adv-stat-label { font-size: 12px; font-weight: 600; color: #64748b; }
         .adv-stat-value { font-size: 22px; font-weight: 800; color: #1e293b; line-height: 1.2; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-        /* result head */
         .adv-result-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 16px 24px; border-bottom: 1px solid #e2e8f0; }
         .adv-result-title { display: flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 700; color: #1e293b; }
         .adv-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
         .adv-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 999px; font-size: 12px; font-weight: 600; }
 
-        /* empty */
         .adv-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 80px 20px; color: #94a3b8; }
         .adv-empty-icon { width: 64px; height: 64px; border-radius: 50%; background: #f1f5f9; display: flex; align-items: center; justify-content: center; }
         .adv-empty-title { font-size: 16px; font-weight: 600; color: #64748b; }
@@ -469,9 +558,8 @@ const AdvanceReportPage = () => {
         .adv-spin { animation: advSpin 1s linear infinite; }
         @keyframes advSpin { to { transform: rotate(360deg); } }
 
-        /* table */
         .adv-table-wrap { overflow-x: auto; }
-        .adv-table { width: 100%; min-width: 820px; border-collapse: collapse; font-size: 14px; }
+        .adv-table { width: 100%; min-width: 980px; border-collapse: collapse; font-size: 14px; }
         .adv-table th { background: #1e293b; color: #f1f5f9; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; text-align: left; padding: 12px 16px; }
         .adv-table th.c, .adv-table td.c { text-align: center; }
         .adv-table th.r, .adv-table td.r { text-align: right; }
@@ -483,6 +571,7 @@ const AdvanceReportPage = () => {
         .adv-row td { border-bottom: 1px solid #f1f5f9; }
         .adv-row:hover td { background: #f8fafc; }
         .adv-jobpill { display: inline-block; padding: 3px 8px; border-radius: 6px; background: #f1f5f9; color: #334155; font-size: 12px; font-weight: 700; }
+        .adv-typebadge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; }
         .adv-cust { font-weight: 600; color: #1e293b; }
         .adv-contact { display: flex; align-items: center; gap: 4px; margin-top: 2px; font-size: 12px; color: #64748b; }
         .adv-rep { display: inline-flex; align-items: center; gap: 8px; font-weight: 500; color: #334155; }

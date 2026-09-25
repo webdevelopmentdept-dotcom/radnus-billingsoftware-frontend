@@ -140,6 +140,7 @@ const ReportPage = () => {
   { label: "Value Report",    path: "/value-report" },
   { label: "Engineer Report", path: "/engineer-report" },
   { label: "Spare Report",    path: "/spare-report" },
+  { label: "Spare Return Report", path: "/spare-return-report" },  
   { label: "Dealer Report",   path: "/dealer-report" },
   { label: "Rebill Report",   path: "/rebill-report" },
   { label: "Income Report",   path: "/income-report" },

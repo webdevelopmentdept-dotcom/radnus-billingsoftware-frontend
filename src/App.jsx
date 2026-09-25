@@ -9,7 +9,7 @@ import RepairedReport from "./components/reports/Repairedreport";
 // App.jsx / routes-ல்
 import ServiceRepReportPage from "./components/reports/ServiceRepReportPage";
 
-
+import SpareReturnReportPage from "./components/reports/Sparereturnreportpage";
 import DailyPendingReport from "./components/reports/DailyPendingReport";
 import ReportPage from "./components/reports/MainReportPage";
 import RepairPendingReport from "./components/reports/RepairPendingReport";
@@ -86,6 +86,8 @@ function App() {
         <Route path="/rebill-report" element={<RebillReportPage />} />
         <Route path="/user-list" element={<UserListPopup />} />
         <Route path="/spare-report" element={<SpareReportPage />} />
+        <Route path="/spare-return-report" element={<SpareReturnReportPage />} />   {/* 👈 NEW */}
+      
       </Routes>
     </BrowserRouter>
   );
