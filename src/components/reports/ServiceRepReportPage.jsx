@@ -5,7 +5,7 @@ import {
   FaUserTie, FaUser, FaWrench, FaCogs, FaRupeeSign, FaBoxOpen,
   FaHandHoldingUsd, FaCoins, FaInstagram, FaStar, FaTable,
   FaChartBar, FaSearch, FaTimes, FaFileExcel, FaCalendarAlt,
-  FaChevronLeft, FaChevronRight, FaArrowsAltH,
+  FaChevronLeft, FaChevronRight, FaArrowsAltH, FaBalanceScale, FaBoxes,
 } from "react-icons/fa";
 
 const API = import.meta.env.VITE_API_URL;
@@ -46,7 +46,13 @@ const fmt = (n) => n ? "₹" + Number(n).toLocaleString("en-IN") : "₹0";
    reset by rebill, so it's already lifetime-accurate as-is.
    Others ₹ now sums othersItems (the per-expense list) when present, same
    idea as Spare — othersItems isn't cleared by rebill either, only the
-   top-level othersAmount summary field is. */
+   top-level othersAmount summary field is.
+
+   ✅ NEW — Raw Spare ₹ mirrors Spare ₹ exactly (rawSpareItems is cumulative,
+   same as spareItems). Balance ₹ is NOT lifetime-summed — it resets to 0 on
+   every rebill (same behaviour used across AllReportPage/RebillReportPage),
+   so job.service.balance is already the correct CURRENT outstanding figure —
+   no range-awareness needed for it. */
 
 const toISODate = (d) => {
   if (!d) return "";
@@ -166,26 +172,31 @@ const getOthersTotal = (job, range = null) => {
 // spares actually added in that window.
 const getSpareTotal = (job, range = null) => {
   const items = job.spareItems || [];
-  const filtered = range ? items.filter((si) => inRange(toISODate(si.date), range.from, range.to)) : items;
+  // ✅ FIX — exclude Returned items before range-filtering/summing, so a
+  // Returned spare doesn't inflate the range-based (Transaction Date) total.
+  // The lifetime fallback below (service.spareCharge) is already correct
+  // since JobSheetPage now computes it excluding Returned items too.
+  const active = items.filter((si) => !si.isReturned);
+  const filtered = range ? active.filter((si) => inRange(toISODate(si.date), range.from, range.to)) : active;
   if (items.length > 0) return filtered.reduce((s, si) => s + Number(si.amount || 0), 0);
   return range ? 0 : Number(job.service?.spareCharge || 0);
 };
 
-// Same idea for Advance ₹: use dated advanceItems when a range is active,
-// falling back to the single advanceDate/advanceAmount pair only when there's
-// no advanceItems list.
-const getAdvanceTotal = (job, range = null) => {
-  const items = job.service?.advanceItems || [];
-  if (items.length > 0) {
-    const filtered = range ? items.filter((a) => inRange(toISODate(a.date), range.from, range.to)) : items;
-    return filtered.reduce((s, a) => s + Number(a.amount || 0), 0);
-  }
-  if (range) {
-    const d = job.service?.advanceDate ? toISODate(job.service.advanceDate) : "";
-    return inRange(d, range.from, range.to) ? Number(job.service?.advanceAmount || 0) : 0;
-  }
-  return Number(job.service?.advanceAmount || 0);
+// ✅ NEW — Raw Spare ₹, exact same pattern as Spare ₹ above (rawSpareItems is
+// the cumulative dated list; service.rawSpareCharge is the cumulative summary).
+const getRawSpareTotal = (job, range = null) => {
+  const items = job.rawSpareItems || [];
+  // ✅ FIX — same Returned-exclusion as getSpareTotal above.
+  const active = items.filter((ri) => !ri.isReturned);
+  const filtered = range ? active.filter((ri) => inRange(toISODate(ri.date), range.from, range.to)) : active;
+  if (items.length > 0) return filtered.reduce((s, ri) => s + Number(ri.amount || 0), 0);
+  return range ? 0 : Number(job.service?.rawSpareCharge || 0);
 };
+// ✅ NEW — Balance ₹. Resets to 0 on every rebill, so the top-level field IS
+// already the correct current outstanding figure — no lifetime summing or
+// range-filtering needed (a Transaction Date range doesn't change what's
+// currently owed).
+const getBalanceTotal = (job) => Number(job.service?.balance || 0);
 
 /* ================= PER-DATE BREAKDOWN (rebill detail, FIX) =================
    🔴 OLD BEHAVIOR — pulled dates from revenueEntries, which meant a job that
@@ -260,28 +271,7 @@ const BreakdownPills = ({ items, color }) => {
   );
 };
 
-/* ================= DATE TYPE FILTER (same idea as ValueReport.jsx) =================
-   Unlike ValueReport (one row per transaction), this page is one row per JOB —
-   JobRow shows a job's lifetime totals in a single row. So a date-type filter
-   here has to decide, per JOB, whether it belongs in the range:
-
-     "received" / "created" → job.createdAt (this is what the "Received Date"
-                               column on this page already shows)
-     "delivery"              → job.service?.deliveryDate
-     "transaction"           → the job matches if ANY of its dated entries
-                               (revenueEntries / spareItems / othersItems /
-                               advanceItems / a rebillHistory cycle) falls
-                               inside the range. This is the one to pick for
-                               month-wise revenue-style checks that must catch
-                               a rebilled job even if its original
-                               received/created date is outside the month —
-                               same reasoning as ValueReport's Transaction
-                               Date option.
-
-   Filtering is done CLIENT-SIDE against the full fetched dataset (rawData),
-   so switching the Date Type dropdown re-filters instantly without another
-   API round-trip, and the fromDate/toDate inputs now drive whichever date
-   field is currently selected instead of always being sent to the backend. */
+/* ================= DATE TYPE FILTER (same idea as ValueReport.jsx) ================= */
 
 const jobMatchesDateFilter = (job, type, from, to) => {
   if (!from && !to) return true;
@@ -296,6 +286,7 @@ const jobMatchesDateFilter = (job, type, from, to) => {
     const dates = [];
     (job.service?.revenueEntries || []).forEach((e) => e.date && dates.push(toISODate(e.date)));
     (job.spareItems || []).forEach((si) => si.date && dates.push(toISODate(si.date)));
+    (job.rawSpareItems || []).forEach((ri) => ri.date && dates.push(toISODate(ri.date)));
     (job.service?.othersItems || []).forEach((oi) => oi.date && dates.push(toISODate(oi.date)));
     (job.service?.advanceItems || []).forEach((a) => a.date && dates.push(toISODate(a.date)));
     (job.rebillHistory || []).forEach((rb) => {
@@ -373,6 +364,19 @@ const SummaryCard = ({ label, value, accent, icon }) => (
 // Adv. Date must agree with whatever Advance ₹ is showing. When a Transaction
 // Date range is active and Advance ₹ is restricted to just the in-range
 // advance(s), the date shown here must be an in-range advance date too.
+const getAdvanceTotal = (job, range = null) => {
+  const items = job.service?.advanceItems || [];
+  if (items.length > 0) {
+    const filtered = range ? items.filter((a) => inRange(toISODate(a.date), range.from, range.to)) : items;
+    return filtered.reduce((s, a) => s + Number(a.amount || 0), 0);
+  }
+  if (range) {
+    const d = job.service?.advanceDate ? toISODate(job.service.advanceDate) : "";
+    return inRange(d, range.from, range.to) ? Number(job.service?.advanceAmount || 0) : 0;
+  }
+  return Number(job.service?.advanceAmount || 0);
+};
+
 const getAdvanceDateDisplay = (job, range = null) => {
   const items = job.service?.advanceItems || [];
   if (items.length > 0) {
@@ -391,7 +395,7 @@ const getAdvanceDateDisplay = (job, range = null) => {
 const JOB_HEADERS = [
   "#", "Job Sheet", "Service Rep", "Created By", "Customer",
   "Contact", "Device", "Status",
-  "Service ₹", "Spare ₹", "Others ₹", "Advance ₹", "Adv. Date", "Income ₹",
+  "Service ₹", "Spare ₹", "Raw Spare ₹", "Balance ₹", "Others ₹", "Advance ₹", "Adv. Date", "Income ₹",
   "Insta", "Google",
   "Received Date", "Delivered Date"
 ];
@@ -399,6 +403,8 @@ const JOB_HEADERS = [
 const JobRow = ({ job, i, rep, range = null }) => {
   const sc  = getServiceTotal(job, range);
   const sp  = getSpareTotal(job, range);
+  const raw = getRawSpareTotal(job, range);
+  const bal = getBalanceTotal(job);
   const inc = getIncomeTotal(job, range);
   const oth = getOthersTotal(job, range);
   const adv = getAdvanceTotal(job, range);
@@ -433,6 +439,8 @@ const JobRow = ({ job, i, rep, range = null }) => {
         <BreakdownPills items={serviceBreakdown} color="#7c3aed" />
       </td>
       <td style={{ padding: "8px 10px", color: "#db2777", fontWeight: 500 }}>{sp ? fmt(sp) : "—"}</td>
+      <td style={{ padding: "8px 10px", color: "#b45309", fontWeight: 500 }}>{raw ? fmt(raw) : "—"}</td>
+      <td style={{ padding: "8px 10px", color: bal > 0 ? "#dc2626" : "#6c757d", fontWeight: 500 }}>{bal ? fmt(bal) : "—"}</td>
       <td style={{ padding: "8px 10px", color: "#c2410c", fontWeight: 500 }}>{oth ? fmt(oth) : "—"}</td>
       <td style={{ padding: "8px 10px", color: "#0d6efd", fontWeight: 500 }}>{adv ? fmt(adv) : "—"}</td>
       <td style={{ padding: "8px 10px", color: "#0369a1", fontSize: 11, whiteSpace: "nowrap" }}>
@@ -592,10 +600,12 @@ const ServiceRepReportPage = () => {
   const todayJobs    = allJobs.filter(j => new Date(j.createdAt).toLocaleDateString() === today).length;
   const totalService = allJobs.reduce((s, j) => s + getServiceTotal(j, activeRange), 0);
   const totalSpare   = allJobs.reduce((s, j) => s + getSpareTotal(j, activeRange), 0);
+  const totalRawSpare= allJobs.reduce((s, j) => s + getRawSpareTotal(j, activeRange), 0);
+  const totalBalance = allJobs.reduce((s, j) => s + getBalanceTotal(j), 0);
   const totalIncome  = allJobs.reduce((s, j) => s + getIncomeTotal(j, activeRange), 0);
   const totalOthers  = allJobs.reduce((s, j) => s + getOthersTotal(j, activeRange), 0);
   const totalAdvance = allJobs.reduce((s, j) => s + getAdvanceTotal(j, activeRange), 0);
-  const grandTotal   = totalService + totalSpare + totalIncome + totalOthers;
+  const grandTotal   = totalService + totalSpare + totalRawSpare + totalIncome + totalOthers;
   const totalInstaYes  = allJobs.filter(j => j.service?.instaFollowers === "Yes").length;
   const totalGoogleYes = allJobs.filter(j => j.service?.googleReview   === "Yes").length;
 
@@ -603,6 +613,8 @@ const ServiceRepReportPage = () => {
     const jobs = data[rep];
     const sc  = jobs.reduce((s, j) => s + getServiceTotal(j, activeRange), 0);
     const sp  = jobs.reduce((s, j) => s + getSpareTotal(j, activeRange), 0);
+    const raw = jobs.reduce((s, j) => s + getRawSpareTotal(j, activeRange), 0);
+    const bal = jobs.reduce((s, j) => s + getBalanceTotal(j), 0);
     const inc = jobs.reduce((s, j) => s + getIncomeTotal(j, activeRange), 0);
     const oth = jobs.reduce((s, j) => s + getOthersTotal(j, activeRange), 0);
     const adv = jobs.reduce((s, j) => s + getAdvanceTotal(j, activeRange), 0);
@@ -613,7 +625,7 @@ const ServiceRepReportPage = () => {
       const st = j.device?.mobileStatus || "Unknown";
       statusCount[st] = (statusCount[st] || 0) + 1;
     });
-    return { rep, jobs: jobs.length, serviceCharge: sc, spareCharge: sp, income: inc, others: oth, advance: adv, instaYes, googleYes, statusCount };
+    return { rep, jobs: jobs.length, serviceCharge: sc, spareCharge: sp, rawSpare: raw, balance: bal, income: inc, others: oth, advance: adv, instaYes, googleYes, statusCount };
   });
 
   const dashRep  = repFilter || repList[0] || "";
@@ -625,6 +637,8 @@ const ServiceRepReportPage = () => {
       data[rep].forEach((job, i) => {
         const sc  = getServiceTotal(job, activeRange);
         const sp  = getSpareTotal(job, activeRange);
+        const raw = getRawSpareTotal(job, activeRange);
+        const bal = getBalanceTotal(job);
         const inc = getIncomeTotal(job, activeRange);
         const oth = getOthersTotal(job, activeRange);
         const adv = getAdvanceTotal(job, activeRange);
@@ -639,6 +653,8 @@ const ServiceRepReportPage = () => {
           "Status":         job.device?.mobileStatus || "—",
           "Service Charge": sc,
           "Spare Charge":   sp,
+          "Raw Spare Charge": raw,
+          "Balance":        bal,
           "Others":         oth,
           "Advance":        adv,
           "Advance Date":   job.service?.advanceDate
@@ -704,16 +720,21 @@ const ServiceRepReportPage = () => {
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(140px,1fr))", gap: 10, marginBottom: 20 }}>
+      {/* ✅ NEW layout — matches ValueReport's field set: Total Jobs, Advance,
+          Balance, Raw Spare, Spare Used, Others, Total (Income), Margin
+          (Service Charge) — plus the extras this page already had (Total
+          Reps, Today's Jobs, Instagram, Google Review). */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(150px,1fr))", gap: 10, marginBottom: 20 }}>
         <SummaryCard label="Total Reps"    value={repList.length} icon={<FaUserTie size={11} color="#6c757d" />} />
         <SummaryCard label="Total Jobs"    value={totalJobs} icon={<FaTable size={11} color="#6c757d" />} />
         <SummaryCard label="Today's Jobs"  value={todayJobs} icon={<FaCalendarAlt size={11} color="#6c757d" />} />
-        <SummaryCard label="Service Total" value={fmt(totalService)}  accent="#7c3aed" icon={<FaWrench size={11} color="#7c3aed" />} />
-        <SummaryCard label="Spare Total"   value={fmt(totalSpare)}    accent="#db2777" icon={<FaCogs size={11} color="#db2777" />} />
-        <SummaryCard label="Income Total"  value={fmt(totalIncome)}   accent="#0e7490" icon={<FaRupeeSign size={11} color="#0e7490" />} />
-        <SummaryCard label="Others Total"  value={fmt(totalOthers)}   accent="#c2410c" icon={<FaBoxOpen size={11} color="#c2410c" />} />
-
-        <SummaryCard label="Total Advance" value={fmt(totalAdvance)}  accent="#0d6efd" icon={<FaHandHoldingUsd size={11} color="#0d6efd" />} />
+        <SummaryCard label="Advance"                 value={fmt(totalAdvance)}  accent="#0d6efd" icon={<FaHandHoldingUsd size={11} color="#0d6efd" />} />
+        <SummaryCard label="Balance"                 value={fmt(totalBalance)}  accent="#dc2626" icon={<FaBalanceScale size={11} color="#dc2626" />} />
+        <SummaryCard label="Raw Spare"                value={fmt(totalRawSpare)} accent="#b45309" icon={<FaBoxes size={11} color="#b45309" />} />
+        <SummaryCard label="Spare Used"               value={fmt(totalSpare)}    accent="#db2777" icon={<FaCogs size={11} color="#db2777" />} />
+        <SummaryCard label="Others"                   value={fmt(totalOthers)}   accent="#c2410c" icon={<FaBoxOpen size={11} color="#c2410c" />} />
+        <SummaryCard label="Total (Income)"           value={fmt(totalIncome)}   accent="#0e7490" icon={<FaRupeeSign size={11} color="#0e7490" />} />
+        <SummaryCard label="Margin (Service Charge)"  value={fmt(totalService)}  accent="#7c3aed" icon={<FaWrench size={11} color="#7c3aed" />} />
         <SummaryCard label="Instagram"     value={totalInstaYes}      accent="#e11d48" icon={<FaInstagram size={11} color="#e11d48" />} />
         <SummaryCard label="Google Review" value={totalGoogleYes}     accent="#d97706" icon={<FaStar size={11} color="#d97706" />} />
       </div>
@@ -817,6 +838,8 @@ const ServiceRepReportPage = () => {
         const jobs = data[rep];
         const uSC  = jobs.reduce((s, j) => s + getServiceTotal(j, activeRange), 0);
         const uSP  = jobs.reduce((s, j) => s + getSpareTotal(j, activeRange), 0);
+        const uRAW = jobs.reduce((s, j) => s + getRawSpareTotal(j, activeRange), 0);
+        const uBAL = jobs.reduce((s, j) => s + getBalanceTotal(j), 0);
         const uINC = jobs.reduce((s, j) => s + getIncomeTotal(j, activeRange), 0);
         const uOTH = jobs.reduce((s, j) => s + getOthersTotal(j, activeRange), 0);
         const uADV = jobs.reduce((s, j) => s + getAdvanceTotal(j, activeRange), 0);
@@ -836,11 +859,13 @@ const ServiceRepReportPage = () => {
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {[
-                  { label: "Service",   val: fmt(uSC),  color: "#7c3aed" },
+                  { label: "Advance",   val: fmt(uADV), color: "#0d6efd" },
+                  { label: "Balance",   val: fmt(uBAL), color: "#dc2626" },
+                  { label: "Raw Spare", val: fmt(uRAW), color: "#b45309" },
                   { label: "Spare",     val: fmt(uSP),  color: "#db2777" },
                   { label: "Others",    val: fmt(uOTH), color: "#c2410c" },
-                  { label: "Advance",   val: fmt(uADV), color: "#0d6efd" },
                   { label: "Income",    val: fmt(uINC), color: "#0e7490" },
+                  { label: "Service",   val: fmt(uSC),  color: "#7c3aed" },
                   { label: "Insta",  val: uInsta,    color: "#e11d48" },
                   { label: "Google", val: uGoogle,   color: "#d97706" },
                 ].map(p => (
@@ -862,6 +887,8 @@ const ServiceRepReportPage = () => {
                     <td colSpan={8} style={{ padding: "8px 10px", fontWeight: 700, fontSize: 13, color: "#166534" }}>Subtotal — {rep}</td>
                     <td style={{ padding: "8px 10px", fontWeight: 700, color: "#7c3aed" }}>{fmt(uSC)}</td>
                     <td style={{ padding: "8px 10px", fontWeight: 700, color: "#db2777" }}>{fmt(uSP)}</td>
+                    <td style={{ padding: "8px 10px", fontWeight: 700, color: "#b45309" }}>{fmt(uRAW)}</td>
+                    <td style={{ padding: "8px 10px", fontWeight: 700, color: "#dc2626" }}>{fmt(uBAL)}</td>
                     <td style={{ padding: "8px 10px", fontWeight: 700, color: "#c2410c" }}>{fmt(uOTH)}</td>
                     <td style={{ padding: "8px 10px", fontWeight: 700, color: "#0d6efd" }}>{fmt(uADV)}</td>
                     <td />
@@ -895,7 +922,7 @@ const ServiceRepReportPage = () => {
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                   <thead>
                     <tr style={{ background: "#f8f9fa" }}>
-                      {["Service Rep", "Total Jobs", "Service ₹", "Spare ₹", "Others ₹", "Advance ₹", "Income ₹", "Insta Yes", "Google Yes"].map(h => (
+                      {["Service Rep", "Total Jobs", "Advance ₹", "Balance ₹", "Raw Spare ₹", "Spare ₹", "Others ₹", "Income ₹", "Service ₹", "Insta Yes", "Google Yes"].map(h => (
                         <th key={h} style={{ padding: "9px 12px", borderBottom: "1px solid #e9ecef", color: "#6c757d", fontWeight: 500, fontSize: 12, whiteSpace: "nowrap" }}>{h}</th>
                       ))}
                     </tr>
@@ -915,23 +942,27 @@ const ServiceRepReportPage = () => {
                         <td style={{ padding: "9px 12px", textAlign: "center" }}>
                           <span style={{ background: "#e9ecef", borderRadius: 20, padding: "2px 10px", fontSize: 12, fontWeight: 600 }}>{u.jobs}</span>
                         </td>
-                        <td style={{ padding: "9px 12px", color: "#7c3aed", fontWeight: 600 }}>{fmt(u.serviceCharge)}</td>
+                        <td style={{ padding: "9px 12px", color: "#0d6efd", fontWeight: 600 }}>{fmt(u.advance)}</td>
+                        <td style={{ padding: "9px 12px", color: "#dc2626", fontWeight: 600 }}>{fmt(u.balance)}</td>
+                        <td style={{ padding: "9px 12px", color: "#b45309", fontWeight: 600 }}>{fmt(u.rawSpare)}</td>
                         <td style={{ padding: "9px 12px", color: "#db2777", fontWeight: 600 }}>{fmt(u.spareCharge)}</td>
                         <td style={{ padding: "9px 12px", color: "#c2410c", fontWeight: 600 }}>{fmt(u.others)}</td>
-                        <td style={{ padding: "9px 12px", color: "#0d6efd", fontWeight: 600 }}>{fmt(u.advance)}</td>
                         <td style={{ padding: "9px 12px", color: "#0e7490", fontWeight: 600 }}>{fmt(u.income)}</td>
+                        <td style={{ padding: "9px 12px", color: "#7c3aed", fontWeight: 600 }}>{fmt(u.serviceCharge)}</td>
                         <td style={{ padding: "9px 12px", color: "#e11d48", fontWeight: 600, textAlign: "center" }}>{u.instaYes}</td>
                         <td style={{ padding: "9px 12px", color: "#d97706", fontWeight: 600, textAlign: "center" }}>{u.googleYes}</td>
                       </tr>
                     ))}
                     <tr style={{ background: "#f0fdf4", borderTop: "2px solid #bbf7d0" }}>
-
+                      <td />
                       <td style={{ padding: "9px 12px", textAlign: "center", fontWeight: 700 }}>{totalJobs}</td>
-                      <td style={{ padding: "9px 12px", fontWeight: 700, color: "#7c3aed" }}>{fmt(totalService)}</td>
+                      <td style={{ padding: "9px 12px", fontWeight: 700, color: "#0d6efd" }}>{fmt(totalAdvance)}</td>
+                      <td style={{ padding: "9px 12px", fontWeight: 700, color: "#dc2626" }}>{fmt(totalBalance)}</td>
+                      <td style={{ padding: "9px 12px", fontWeight: 700, color: "#b45309" }}>{fmt(totalRawSpare)}</td>
                       <td style={{ padding: "9px 12px", fontWeight: 700, color: "#db2777" }}>{fmt(totalSpare)}</td>
                       <td style={{ padding: "9px 12px", fontWeight: 700, color: "#c2410c" }}>{fmt(totalOthers)}</td>
-                      <td style={{ padding: "9px 12px", fontWeight: 700, color: "#0d6efd" }}>{fmt(totalAdvance)}</td>
                       <td style={{ padding: "9px 12px", fontWeight: 700, color: "#0e7490" }}>{fmt(totalIncome)}</td>
+                      <td style={{ padding: "9px 12px", fontWeight: 700, color: "#7c3aed" }}>{fmt(totalService)}</td>
                       <td style={{ padding: "9px 12px", fontWeight: 700, color: "#e11d48", textAlign: "center" }}>{totalInstaYes}</td>
                       <td style={{ padding: "9px 12px", fontWeight: 700, color: "#d97706", textAlign: "center" }}>{totalGoogleYes}</td>
                     </tr>
@@ -954,13 +985,15 @@ const ServiceRepReportPage = () => {
                       <span style={{ fontWeight: 700, fontSize: 16, display: "inline-flex", alignItems: "center", gap: 6 }}><FaUserTie size={14} /> {u.rep}</span>
                       <span style={{ fontSize: 13, color: "#6c757d" }}>{u.jobs} jobs</span>
                     </div>
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(140px,1fr))", gap: 10, marginBottom: 20 }}>
-                      <SummaryCard label="Total Jobs"     value={u.jobs} />
-                      <SummaryCard label="Service Charge" value={fmt(u.serviceCharge)} accent="#7c3aed" icon={<FaWrench size={11} color="#7c3aed" />} />
-                      <SummaryCard label="Spare Charge"   value={fmt(u.spareCharge)}   accent="#db2777" icon={<FaCogs size={11} color="#db2777" />} />
-                      <SummaryCard label="Others"         value={fmt(u.others)}        accent="#c2410c" icon={<FaBoxOpen size={11} color="#c2410c" />} />
-                      <SummaryCard label="Advance"        value={fmt(u.advance)}        accent="#0d6efd" icon={<FaHandHoldingUsd size={11} color="#0d6efd" />} />
-                      <SummaryCard label="Income"         value={fmt(u.income)}        accent="#0e7490" icon={<FaRupeeSign size={11} color="#0e7490" />} />
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(150px,1fr))", gap: 10, marginBottom: 20 }}>
+                      <SummaryCard label="Total Jobs"      value={u.jobs} />
+                      <SummaryCard label="Advance"         value={fmt(u.advance)}       accent="#0d6efd" icon={<FaHandHoldingUsd size={11} color="#0d6efd" />} />
+                      <SummaryCard label="Balance"         value={fmt(u.balance)}       accent="#dc2626" icon={<FaBalanceScale size={11} color="#dc2626" />} />
+                      <SummaryCard label="Raw Spare"       value={fmt(u.rawSpare)}      accent="#b45309" icon={<FaBoxes size={11} color="#b45309" />} />
+                      <SummaryCard label="Spare Used"      value={fmt(u.spareCharge)}   accent="#db2777" icon={<FaCogs size={11} color="#db2777" />} />
+                      <SummaryCard label="Others"          value={fmt(u.others)}        accent="#c2410c" icon={<FaBoxOpen size={11} color="#c2410c" />} />
+                      <SummaryCard label="Total (Income)"  value={fmt(u.income)}        accent="#0e7490" icon={<FaRupeeSign size={11} color="#0e7490" />} />
+                      <SummaryCard label="Margin (Service Charge)" value={fmt(u.serviceCharge)} accent="#7c3aed" icon={<FaWrench size={11} color="#7c3aed" />} />
                       <SummaryCard label="Insta Yes"  value={u.instaYes}             accent="#e11d48" icon={<FaInstagram size={11} color="#e11d48" />} />
                       <SummaryCard label="Google Yes" value={u.googleYes}            accent="#d97706" icon={<FaStar size={11} color="#d97706" />} />
                     </div>

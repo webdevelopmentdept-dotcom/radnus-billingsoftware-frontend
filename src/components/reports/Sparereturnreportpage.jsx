@@ -66,7 +66,19 @@ const StatCard = ({ icon: Icon, label, value, tone }) => (
    `returnReason` on the item) is now shown clearly under the spare's row
    as a dedicated "Remark" note line, instead of a cramped table column
    that could get cut off. When no remark was entered, it just says so
-   in muted text instead of a bare "-". */
+   in muted text instead of a bare "-".
+
+   ✅ FIX — double-entry bug. When a "From Raw Stock" Spare Used item is
+   Returned, SparePopup auto-syncs the matching Raw Spare purchase entry
+   to Returned too (same physical part, tagged `syncedReturn: true` on the
+   raw entry). Previously this report scanned both lists independently, so
+   that ONE return showed up as TWO rows here — once as "Spare Used", once
+   as "Raw Spare" — doubling the item count and the returned value. Raw
+   entries carrying `syncedReturn: true` are now skipped on the Raw Spare
+   side, since they're already represented once under Spare Used. A raw
+   entry Returned directly inside RawSparePopup (a genuine standalone
+   purchase return that was never billed on a job) has no such flag and
+   still shows correctly as its own "Raw Spare" row. */
 const SpareReturnReportPage = () => {
   const [rawData, setRawData] = useState([]);
   const [filters, setFilters] = useState(emptyFilters());
@@ -127,8 +139,12 @@ const SpareReturnReportPage = () => {
       const returnedUsed = (item.spareItems || [])
         .filter((ri) => ri.isReturned)
         .map((ri) => ({ ...ri, source: "Spare Used" }));
+      // ✅ FIX — skip raw entries that were only marked Returned because
+      // they're synced from a "From Raw Stock" Spare Used return (same
+      // physical part, already counted once above via returnedUsed).
+      // Only a genuine standalone Raw Spare return (no sync flag) shows here.
       const returnedRaw = (item.rawSpareItems || [])
-        .filter((ri) => ri.isReturned)
+        .filter((ri) => ri.isReturned && !ri.syncedReturn)
         .map((ri) => ({ ...ri, source: "Raw Spare" }));
       const returnedItems = [...returnedUsed, ...returnedRaw];
 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
 import Select from "react-select";
-import { Package, X, Plus, Pencil, Trash2, Check, ListPlus } from "lucide-react";
+import { Package, X, Plus, Pencil, Trash2, Check, ListPlus, RotateCcw, Undo2 } from "lucide-react";
 
 /* ================= THEME — amber, matches the old Raw Spare section ================= */
 const AMBER = "#D97706";
@@ -11,6 +11,7 @@ const BLUE = "#2563EB";
 const BLUE_SOFT_BG = "#EFF6FF";
 const GREEN = "#16A34A";
 const RED = "#DC2626";
+const RED_SOFT_BG = "#FEF2F2";
 const GRAY_TEXT = "#6B7280";
 const BORDER = "#E5E7EB";
 
@@ -49,15 +50,36 @@ const iconBtnStyle = {
    Actual DB persistence happens when the Job Sheet "Update" button
    is clicked (rawSpareItems is already appended in handleSave/handleUpdate).
 
-   ✅ NEW — rawSpareBaselineAmount prop: the CUMULATIVE raw-spare total that
+   ✅ rawSpareBaselineAmount prop: the CUMULATIVE raw-spare total that
    existed the exact moment the job was last rebilled (comes from
    JobSheetPage's rawSpareBaselineRef.current, itself loaded from
    service.rawSpareBaseline, set by the backend /rebill route). Exactly the
    same amount-based "before rebill" split SparePopup already does for
    spareItems — walks rawItems IN ORDER and marks an item "before rebill" as
-   long as the running sum-so-far is still under this baseline. Without this,
-   Raw Spare had no cycle concept at all: after a rebill it kept showing the
-   FULL lifetime total instead of going empty for the new cycle.
+   long as the running sum-so-far is still under this baseline.
+
+   ✅ RETURN. A Raw Spare purchase entry can be marked Returned (e.g. bought
+   wrong part, sent back to the supplier), exactly like Spare Used already
+   supports. Same checkbox-select → Return bar (date + remark) →
+   Confirm/Undo workflow as SparePopup, same isReturned/returnDate/
+   returnReason fields on the item.
+   A returned raw item:
+   - is excluded from the Spare Report (handled in SpareReportPage.jsx)
+   - is excluded from "available stock" in SparePopup's "From Raw Stock" tab
+     (handled in SparePopup.jsx)
+   - shows up in the Spare Return Report (already scans rawSpareItems there)
+
+   ✅ SYNCED RETURN — real two-way sync (moved to SparePopup.jsx). When a
+   "From Raw Stock" Spare Used item is Returned in SparePopup, SparePopup
+   now directly mutates its own live copy of rawSpareItems (matching by
+   name + qty) and marks the corresponding Raw Spare purchase entry as
+   Returned too — and vice-versa on Undo. Both popups' "Save" writes the
+   same synced array back to the job, so this popup needs NO extra logic
+   for that: it just displays whatever rawSpareItems it's handed, same as
+   before. (Earlier this component tried to compute its own "back in
+   stock" badge from a `spareUsedItems` prop that was never actually
+   passed in — that's removed now; the real sync in SparePopup makes it
+   redundant, since a truly-synced item just shows here as "Returned".)
 ===================================================== */
 const RawSparePopup = ({
   onClose,
@@ -111,6 +133,11 @@ const RawSparePopup = ({
   const [rawDate, setRawDate] = useState(today);
   const [rawItems, setRawItems] = useState(existingRawItems);
 
+  // ✅ return workflow state, same pattern as SparePopup
+  const [selectedIndices, setSelectedIndices] = useState([]);
+  const [returnDateInput, setReturnDateInput] = useState(today);
+  const [returnReasonInput, setReturnReasonInput] = useState("");
+
   const handleAddCustomRawSpare = async () => {
     const val = rawCustomName.trim();
     if (!val) return;
@@ -156,7 +183,10 @@ const RawSparePopup = ({
       return;
     }
 
-    const newItem = { name: rawName, qty: Number(rawQty), rate: Number(rawRate), amount: rawAmount, date: rawDate };
+    const newItem = {
+      name: rawName, qty: Number(rawQty), rate: Number(rawRate), amount: rawAmount, date: rawDate,
+      isReturned: false, returnDate: null, returnReason: "",
+    };
     setRawItems([...rawItems, newItem]);
 
     setRawName("");
@@ -169,12 +199,80 @@ const RawSparePopup = ({
 
   const removeRawItem = (index) => {
     setRawItems(rawItems.filter((_, i) => i !== index));
+    setSelectedIndices(prev => prev.filter(i => i !== index).map(i => (i > index ? i - 1 : i)));
   };
 
-  // ✅ NEW — same amount-based cycle split as SparePopup. Walk rawItems in
-  // order; an item is "before rebill" as long as the running sum-so-far is
-  // still under the baseline captured at rebill time.
-  const cumulativeTotal = rawItems.reduce((sum, i) => sum + i.amount, 0);
+  /* ===================================================================
+     RETURN WORKFLOW (mirrors SparePopup)
+  =================================================================== */
+  const toggleSelect = (index) => {
+    setSelectedIndices(prev =>
+      prev.includes(index) ? prev.filter(i => i !== index) : [...prev, index]
+    );
+  };
+
+  const activeSelectableIndices = rawItems
+    .map((it, idx) => (!it.isReturned ? idx : null))
+    .filter(idx => idx !== null);
+
+  const allActiveSelected =
+    activeSelectableIndices.length > 0 &&
+    activeSelectableIndices.every(idx => selectedIndices.includes(idx));
+
+  const toggleSelectAll = () => {
+    if (allActiveSelected) {
+      setSelectedIndices([]);
+    } else {
+      setSelectedIndices(activeSelectableIndices);
+    }
+  };
+
+  const quickReturnOne = (index) => {
+    setSelectedIndices([index]);
+    setReturnDateInput(today);
+    setReturnReasonInput("");
+  };
+
+  const cancelReturnBar = () => {
+    setSelectedIndices([]);
+    setReturnDateInput(today);
+    setReturnReasonInput("");
+  };
+
+  const confirmReturn = () => {
+    if (selectedIndices.length === 0) return;
+    if (!returnDateInput) {
+      showFeedback("error", "Select a Return Date");
+      return;
+    }
+    const chosenSet = new Set(selectedIndices);
+    setRawItems(prev => prev.map((it, i) =>
+      chosenSet.has(i)
+        ? { ...it, isReturned: true, returnDate: returnDateInput, returnReason: returnReasonInput.trim() }
+        : it
+    ));
+    showFeedback("success", selectedIndices.length > 1
+      ? `${selectedIndices.length} items marked as Returned`
+      : "Marked as Returned");
+    setSelectedIndices([]);
+    setReturnDateInput(today);
+    setReturnReasonInput("");
+  };
+
+  const undoReturn = (index) => {
+    setRawItems(prev => prev.map((it, i) =>
+      i === index
+        ? { ...it, isReturned: false, returnDate: null, returnReason: "" }
+        : it
+    ));
+    showFeedback("success", "Return undone");
+  };
+
+  // cumulative/current totals exclude Returned items, same as SparePopup,
+  // so a returned purchase doesn't inflate the Raw Spare total.
+  const cumulativeTotal = rawItems
+    .filter(i => !i.isReturned)
+    .reduce((sum, i) => sum + i.amount, 0);
 
   let runningSum = 0;
   const itemsWithCycle = rawItems.map((item, idx) => {
@@ -184,8 +282,13 @@ const RawSparePopup = ({
   });
 
   const currentCycleItems = itemsWithCycle.filter(({ isOld }) => !isOld);
-  const rawTotal = currentCycleItems.reduce((sum, { item }) => sum + item.amount, 0);
+  const rawTotal = currentCycleItems
+    .filter(({ item }) => !item.isReturned)
+    .reduce((sum, { item }) => sum + item.amount, 0);
   const hasRebillSplit = rawSpareBaselineAmount > 0;
+
+  const returnedItems = rawItems.filter(i => i.isReturned);
+  const returnedTotal = returnedItems.reduce((sum, i) => sum + i.amount, 0);
 
   /* ===================================================================
      MANAGE (rename/delete) — shared master list, same as SparePopup
@@ -421,59 +524,161 @@ const RawSparePopup = ({
             </div>
           </div>
 
+          {/* Return bar, identical workflow to Spare Used */}
+          {selectedIndices.length > 0 && (
+            <div style={returnBar}>
+              <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#991B1B", paddingBottom: 7, whiteSpace: "nowrap" }}>
+                  {selectedIndices.length} item{selectedIndices.length > 1 ? "s" : ""} selected for Return
+                </div>
+                <div style={{ width: 160 }}>
+                  <label style={{ ...label, color: "#991B1B" }}>Return Date</label>
+                  <input
+                    type="date"
+                    value={returnDateInput}
+                    onChange={(e) => setReturnDateInput(e.target.value)}
+                    style={smallInput}
+                  />
+                </div>
+                <div style={{ flex: 1, minWidth: 180 }}>
+                  <label style={{ ...label, color: "#991B1B" }}>Remark (optional)</label>
+                  <input
+                    placeholder="e.g. Wrong part, sent back to supplier..."
+                    value={returnReasonInput}
+                    onChange={(e) => setReturnReasonInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); confirmReturn(); } }}
+                    style={input}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={confirmReturn}
+                  style={{ ...iconBtnStyle, background: RED, color: "#fff", padding: "7px 14px", fontWeight: 600, display: "flex", alignItems: "center", gap: 5, height: 32 }}
+                >
+                  <Check size={13} /> Confirm Return {selectedIndices.length > 1 ? `(${selectedIndices.length})` : ""}
+                </button>
+                <button
+                  type="button"
+                  onClick={cancelReturnBar}
+                  style={{ ...iconBtnStyle, background: "#E5E7EB", color: "#374151", padding: "7px 14px", fontWeight: 600, height: 32 }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
           <div style={itemsCard}>
             <table style={table}>
               <thead>
                 <tr>
+                  {/* select-all checkbox column, same as Spare Used */}
+                  <th style={{ ...th, width: 34 }}>
+                    {activeSelectableIndices.length > 0 && (
+                      <input
+                        type="checkbox"
+                        checked={allActiveSelected}
+                        onChange={toggleSelectAll}
+                        title="Select all active items"
+                        style={{ cursor: "pointer" }}
+                      />
+                    )}
+                  </th>
                   <th style={th}>Name</th>
                   <th style={th}>Qty</th>
                   <th style={th}>Rate ₹</th>
                   <th style={th}>Amount ₹</th>
                   <th style={th}>Date</th>
-                  <th style={{ ...th, width: 40 }}></th>
+                  <th style={th}>Status</th>
+                  <th style={{ ...th, width: 70 }}></th>
                 </tr>
               </thead>
               <tbody>
                 {itemsWithCycle.length === 0 ? (
                   <tr>
-                    <td colSpan={6} style={{ ...td, textAlign: "center", color: "#9CA3AF", padding: "18px 6px" }}>
+                    <td colSpan={8} style={{ ...td, textAlign: "center", color: "#9CA3AF", padding: "18px 6px" }}>
                       No raw spare purchases added yet
                     </td>
                   </tr>
                 ) : itemsWithCycle.map(({ item: i, idx: index, isOld }) => (
-                  <tr key={index} style={isOld ? { background: "#F9FAFB" } : undefined}>
-                    <td style={{ ...td, color: isOld ? "#9CA3AF" : "#111827" }}>
-                      {i.name}
-                      {isOld && (
-                        <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: "#9CA3AF", background: "#F1F5F9", padding: "1px 6px", borderRadius: 10 }}>
-                          Before Rebill
+                  <React.Fragment key={index}>
+                    <tr style={{ background: i.isReturned ? "#FFF5F5" : (isOld ? "#F9FAFB" : undefined), opacity: i.isReturned ? 0.75 : 1 }}>
+                      <td style={td}>
+                        {!i.isReturned && (
+                          <input
+                            type="checkbox"
+                            checked={selectedIndices.includes(index)}
+                            onChange={() => toggleSelect(index)}
+                            style={{ cursor: "pointer" }}
+                          />
+                        )}
+                      </td>
+                      <td style={{ ...td, color: isOld ? "#9CA3AF" : "#111827", textDecoration: i.isReturned ? "line-through" : "none" }}>
+                        {i.name}
+                        {isOld && (
+                          <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: "#9CA3AF", background: "#F1F5F9", padding: "1px 6px", borderRadius: 10 }}>
+                            Before Rebill
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ ...td, color: isOld ? "#9CA3AF" : "#111827" }}>{i.qty}</td>
+                      <td style={{ ...td, color: isOld ? "#9CA3AF" : "#111827" }}>{i.rate}</td>
+                      <td style={{ ...td, fontWeight: 600, color: isOld ? "#9CA3AF" : "#111827" }}>{i.amount}</td>
+                      <td style={{ ...td, color: isOld ? "#9CA3AF" : "#111827" }}>{i.date ? String(i.date).slice(0, 10) : "-"}</td>
+                      <td style={td}>
+                        {i.isReturned ? (
+                          <span style={returnedBadge}>Returned</span>
+                        ) : (
+                          <span style={activeBadge}>Active</span>
+                        )}
+                      </td>
+                      <td style={td}>
+                        <span style={{ display: "flex", gap: 4, justifyContent: "center" }}>
+                          {i.isReturned ? (
+                            <button onClick={() => undoReturn(index)} style={{ ...undoBtn, display: "flex", alignItems: "center", justifyContent: "center" }} title="Undo Return">
+                              <Undo2 size={12} />
+                            </button>
+                          ) : (
+                            <button onClick={() => quickReturnOne(index)} style={{ ...returnBtn, display: "flex", alignItems: "center", justifyContent: "center" }} title="Return this item">
+                              <RotateCcw size={12} />
+                            </button>
+                          )}
+                          <button onClick={() => removeRawItem(index)} style={{ ...deleteBtn, display: "flex", alignItems: "center", justifyContent: "center" }} title="Remove">
+                            <Trash2 size={12} />
+                          </button>
                         </span>
-                      )}
-                    </td>
-                    <td style={{ ...td, color: isOld ? "#9CA3AF" : "#111827" }}>{i.qty}</td>
-                    <td style={{ ...td, color: isOld ? "#9CA3AF" : "#111827" }}>{i.rate}</td>
-                    <td style={{ ...td, fontWeight: 600, color: isOld ? "#9CA3AF" : "#111827" }}>{i.amount}</td>
-                    <td style={{ ...td, color: isOld ? "#9CA3AF" : "#111827" }}>{i.date ? String(i.date).slice(0, 10) : "-"}</td>
-                    <td style={td}>
-                      <button onClick={() => removeRawItem(index)} style={{ ...deleteBtn, display: "flex", alignItems: "center", justifyContent: "center" }} title="Remove">
-                        <Trash2 size={12} />
-                      </button>
-                    </td>
-                  </tr>
+                      </td>
+                    </tr>
+
+                    {i.isReturned && (i.returnReason || i.returnDate) && (
+                      <tr>
+                        <td colSpan={8} style={{ padding: "0 10px 8px", fontSize: 11.5, color: "#991B1B", borderBottom: `1px solid #F1F5F9` }}>
+                          ↳ Returned {i.returnDate ? `on ${String(i.returnDate).slice(0, 10)}` : ""}{i.returnReason ? ` — ${i.returnReason}` : ""}
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
                 ))}
               </tbody>
             </table>
           </div>
 
-          <div style={{ textAlign: "right", marginTop: 10 }}>
-            <div style={{ fontWeight: 700, fontSize: 15, color: "#111827" }}>
-              Raw Spare Total {hasRebillSplit ? "(this cycle)" : ""} : <span style={{ color: AMBER }}>₹ {rawTotal}</span>
-            </div>
-            {hasRebillSplit && cumulativeTotal !== rawTotal && (
-              <div style={{ fontSize: 11, color: "#6B7280", marginTop: 2 }}>
-                Lifetime total (all cycles): ₹ {cumulativeTotal}
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 24, marginTop: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+            {returnedItems.length > 0 && (
+              <div style={{ fontWeight: 600, fontSize: 13, color: RED }}>
+                Returned ({returnedItems.length}) : ₹ {returnedTotal}
               </div>
             )}
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontWeight: 700, fontSize: 15, color: "#111827" }}>
+                Raw Spare Total {hasRebillSplit ? "(this cycle)" : ""} : <span style={{ color: AMBER }}>₹ {rawTotal}</span>
+              </div>
+              {hasRebillSplit && cumulativeTotal !== rawTotal && (
+                <div style={{ fontSize: 11, color: "#6B7280", marginTop: 2 }}>
+                  Lifetime total (all cycles): ₹ {cumulativeTotal}
+                </div>
+              )}
+            </div>
           </div>
 
         </div>
@@ -498,7 +703,7 @@ const overlay = {
   alignItems: "center", zIndex: 999
 };
 const modal = {
-  background: "#fff", borderRadius: 12, width: "780px", maxWidth: "95vw",
+  background: "#fff", borderRadius: 12, width: "820px", maxWidth: "95vw",
   maxHeight: "90vh", overflowY: "auto",
   boxShadow: "0 10px 30px rgba(0,0,0,0.25)"
 };
@@ -513,6 +718,9 @@ const closeBtn = {
 };
 const addCard = {
   border: `1px solid ${BORDER}`, borderRadius: 10, padding: 14, marginBottom: 16, background: "#FAFBFC",
+};
+const returnBar = {
+  border: `1px solid #FCA5A5`, borderRadius: 10, padding: 12, marginBottom: 14, background: RED_SOFT_BG,
 };
 const itemsCard = {
   border: `1px solid ${BORDER}`, borderRadius: 10, overflow: "hidden",
@@ -535,9 +743,13 @@ const primaryBtn = { background: BLUE, color: "#fff", border: "none", padding: "
 const ghostBtn = { background: "#fff", color: "#374151", border: `1px solid ${BORDER}`, padding: "8px 16px", borderRadius: 6, cursor: "pointer", fontWeight: 600, fontSize: 13 };
 const saveBtn = { background: GREEN, color: "#fff", border: "none", padding: "8px 20px", borderRadius: 6, cursor: "pointer", fontWeight: 700, fontSize: 13 };
 const deleteBtn = { background: RED, color: "#fff", border: "none", width: 24, height: 24, borderRadius: 5, cursor: "pointer", fontSize: 11, lineHeight: 1 };
+const returnBtn = { background: "#D97706", color: "#fff", border: "none", width: 24, height: 24, borderRadius: 5, cursor: "pointer", fontSize: 11, lineHeight: 1 };
+const undoBtn = { background: "#64748B", color: "#fff", border: "none", width: 24, height: 24, borderRadius: 5, cursor: "pointer", fontSize: 11, lineHeight: 1 };
 const table = { width: "100%", borderCollapse: "collapse" };
 const th = { textAlign: "left", padding: "8px 10px", background: "#F9FAFB", color: "#374151", fontSize: 12, fontWeight: 700, borderBottom: `1px solid ${BORDER}` };
 const td = { padding: "8px 10px", fontSize: 13, color: "#111827", borderBottom: `1px solid #F1F5F9` };
+const returnedBadge = { display: "inline-block", padding: "2px 8px", borderRadius: 999, background: RED_SOFT_BG, color: RED, fontSize: 11, fontWeight: 700 };
+const activeBadge = { display: "inline-block", padding: "2px 8px", borderRadius: 999, background: "#F0FDF4", color: "#16A34A", fontSize: 11, fontWeight: 700 };
 const footerBar = {
   display: "flex", justifyContent: "flex-end", gap: 10,
   padding: "14px 20px", borderTop: `1px solid ${BORDER}`,

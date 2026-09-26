@@ -3,6 +3,49 @@ import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
 
+/* =====================================================
+   ✅ NEW HELPERS — cycle split + returned totals
+
+   Spare/Raw Spare items are stored CUMULATIVE (full lifetime history,
+   never wiped on rebill). The "baseline" saved at rebill time is the
+   running-sum cutoff: walk the items array IN ORDER, and as long as the
+   sum-so-far is still under the baseline, that item belongs to a PAST
+   cycle ("before rebill"). Everything after is the CURRENT cycle.
+   This mirrors exactly what SparePopup / RawSparePopup already do.
+
+   `getCycleTotals` returns, for the CURRENT cycle only:
+     - activeTotal   → sum of non-returned item amounts (real billable total)
+     - returnedTotal → sum of returned item amounts (this cycle only)
+
+   `getLifetimeReturned` returns total returned across ALL cycles — used
+   because individual past-cycle item snapshots aren't stored in
+   rebillHistory (only aggregate numbers are), so a *lifetime* returned
+   figure is the most accurate thing we can show for "before rebill" data.
+===================================================== */
+const splitByCycle = (items = [], baseline = 0) => {
+  let runningSum = 0;
+  return items.map((item) => {
+    const isOld = runningSum < baseline;
+    runningSum += Number(item.amount || 0);
+    return { item, isOld };
+  });
+};
+
+const getCycleTotals = (items = [], baseline = 0) => {
+  const withCycle = splitByCycle(items, baseline);
+  const current = withCycle.filter(({ isOld }) => !isOld).map(({ item }) => item);
+  const activeTotal = current
+    .filter((i) => !i.isReturned)
+    .reduce((s, i) => s + Number(i.amount || 0), 0);
+  const returnedTotal = current
+    .filter((i) => i.isReturned)
+    .reduce((s, i) => s + Number(i.amount || 0), 0);
+  return { activeTotal, returnedTotal };
+};
+
+const getLifetimeReturned = (items = []) =>
+  items.filter((i) => i.isReturned).reduce((s, i) => s + Number(i.amount || 0), 0);
+
 const RebillReportPage = () => {
   const [data,           setData]           = useState([]);
   const [filtered,       setFiltered]       = useState([]);
@@ -128,48 +171,77 @@ const RebillReportPage = () => {
     return sum + histIncome + currIncome;
   }, 0);
 
+  // ✅ NEW — Total outstanding Balance across every filtered job (current cycle only,
+  // since Balance resets to 0 on every rebill — job.service.balance IS the current figure).
+  const totalOutstandingBalance = filtered.reduce(
+    (sum, j) => sum + Number(j.service?.balance || 0), 0
+  );
+
   const handleExcel = () => {
     const rows = [];
 
     filtered.forEach((job) => {
+      const spareBaseline    = Number(job.service?.spareBaseline    || 0);
+      const rawSpareBaseline = Number(job.service?.rawSpareBaseline || 0);
+      const othersBaseline   = Number(job.service?.othersBaseline   || 0);
+      const advanceBaseline  = Number(job.service?.advanceBaseline  || 0);
+
+      const spareCycle    = getCycleTotals(job.spareItems,    spareBaseline);
+      const rawSpareCycle = getCycleTotals(job.rawSpareItems, rawSpareBaseline);
+
+      const currentCycleOthers  = Math.max(0, Number(job.service?.othersAmount  || 0) - othersBaseline);
+      const currentCycleAdvance = Math.max(0, Number(job.service?.advanceAmount || 0) - advanceBaseline);
+
       (job.rebillHistory || []).forEach((rb, ri) => {
         rows.push({
-          "Job No":         job.jobSheetNo,
-          "Customer":       job.customer?.name    || "-",
-          "Contact":        job.customer?.contact || "-",
-          "Device":         [job.device?.make, job.device?.model].filter(Boolean).join(" ") || "-",
-          "Service Rep":    job.service?.serviceRep || "-",
-          "Engineer":       job.service?.engineer || "-",
-          "Cycle":          `Before Rebill #${ri + 1}`,
-          "Income ₹":       rb.income        || 0,
-          "Service ₹":      rb.serviceCharge || 0,
-          "Spare ₹":        rb.spareCharge   || 0,
-          "Others ₹":       rb.othersAmount  || 0,
-          "Status at time": rb.status     || "-",
-          "Remarks":        rb.remarks    || "-",
-          "Rebilled By":    rb.rebilledBy || "-",
-          "Rebilled At":    fmtDate(rb.rebilledAt),
-          "Created At":     fmtDate(job.createdAt),
+          "Job No":              job.jobSheetNo,
+          "Customer":            job.customer?.name    || "-",
+          "Contact":             job.customer?.contact || "-",
+          "Device":              [job.device?.make, job.device?.model].filter(Boolean).join(" ") || "-",
+          "Service Rep":         job.service?.serviceRep || "-",
+          "Engineer":            job.service?.engineer || "-",
+          "Cycle":               `Before Rebill #${ri + 1}`,
+          "Income ₹":            rb.income         || 0,
+          "Balance ₹":           rb.balance        || 0,
+          "Service ₹":           rb.serviceCharge  || 0,
+          "Spare ₹":             rb.spareCharge    || 0,
+          "Raw Spare ₹":         rb.rawSpareCharge || 0,
+          "Others ₹":            rb.othersAmount   || 0,
+          "Advance ₹":           rb.advanceAmount  || 0,
+          "Returned Spare ₹":    "-",   // not tracked per past cycle (see note in UI)
+          "Returned Raw Spare ₹":"-",
+          "Payment Mode":        rb.paymentMode || "-",
+          "Status at time":      rb.status     || "-",
+          "Remarks":             rb.remarks    || "-",
+          "Rebilled By":         rb.rebilledBy || "-",
+          "Rebilled At":         fmtDate(rb.rebilledAt),
+          "Created At":          fmtDate(job.createdAt),
         });
       });
 
       rows.push({
-        "Job No":         job.jobSheetNo,
-        "Customer":       job.customer?.name    || "-",
-        "Contact":        job.customer?.contact || "-",
-        "Device":         [job.device?.make, job.device?.model].filter(Boolean).join(" ") || "-",
-        "Service Rep":    job.service?.serviceRep || "-",
-        "Engineer":       job.service?.engineer || "-",
-        "Cycle":          `Current (After Rebill #${(job.rebillHistory?.length || 0)})`,
-        "Income ₹":       job.service?.income       || 0,
-        "Service ₹":      job.service?.serviceCharge || 0,
-        "Spare ₹":        Math.max(0, Number(job.service?.spareCharge || 0) - Number(job.service?.spareBaseline || 0)),
-        "Others ₹":       job.service?.othersAmount  || 0,
-        "Status at time": job.device?.mobileStatus || "-",
-        "Remarks":        job.service?.remarks || "-",
-        "Rebilled By":    "-",
-        "Rebilled At":    "-",
-        "Created At":     fmtDate(job.createdAt),
+        "Job No":              job.jobSheetNo,
+        "Customer":            job.customer?.name    || "-",
+        "Contact":             job.customer?.contact || "-",
+        "Device":              [job.device?.make, job.device?.model].filter(Boolean).join(" ") || "-",
+        "Service Rep":         job.service?.serviceRep || "-",
+        "Engineer":            job.service?.engineer || "-",
+        "Cycle":               `Current (After Rebill #${(job.rebillHistory?.length || 0)})`,
+        "Income ₹":            job.service?.income        || 0,
+        "Balance ₹":           job.service?.balance       || 0,
+        "Service ₹":           job.service?.serviceCharge || 0,
+        "Spare ₹":             spareCycle.activeTotal,
+        "Raw Spare ₹":         rawSpareCycle.activeTotal,
+        "Others ₹":            currentCycleOthers,
+        "Advance ₹":           currentCycleAdvance,
+        "Returned Spare ₹":    spareCycle.returnedTotal,
+        "Returned Raw Spare ₹":rawSpareCycle.returnedTotal,
+        "Payment Mode":        job.service?.paymentMode || "-",
+        "Status at time":      job.device?.mobileStatus || "-",
+        "Remarks":             job.service?.remarks || "-",
+        "Rebilled By":         "-",
+        "Rebilled At":         "-",
+        "Created At":          fmtDate(job.createdAt),
       });
     });
 
@@ -200,7 +272,7 @@ const RebillReportPage = () => {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, flexWrap: "wrap", gap: 10 }}>
           <div>
             <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, color: "#0f172a" }}>🔄 Rebill Report</h1>
-            <p style={{ margin: "4px 0 0", fontSize: 13, color: "#64748b" }}>Jobs that were reopened and rebilled after invoice — Income/Service/Spare/Others shown before & after each rebill</p>
+            <p style={{ margin: "4px 0 0", fontSize: 13, color: "#64748b" }}>Jobs that were reopened and rebilled after invoice — Income / Balance / Service / Spare / Raw Spare / Others / Advance / Returns shown before &amp; after each rebill</p>
           </div>
           <div className="no-print" style={{ display: "flex", gap: 8 }}>
             <button onClick={() => navigate(-1)}
@@ -219,16 +291,17 @@ const RebillReportPage = () => {
         </div>
 
         {/* SUMMARY CARDS */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 20 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 20 }}>
           {[
             { label: "Total Rebilled Jobs",    value: filtered.length,       color: "#6366f1", bg: "#eef2ff", icon: "📋" },
             { label: "Total Rebill Instances", value: totalRebills,           color: "#f59e0b", bg: "#fffbeb", icon: "🔄" },
             { label: "Total Income (All)",     value: fmtCurrency(totalRevenue), color: "#10b981", bg: "#f0fdf4", icon: "💰" },
+            { label: "Outstanding Balance (Current)", value: fmtCurrency(totalOutstandingBalance), color: "#dc2626", bg: "#fef2f2", icon: "⏳" },
           ].map((c, i) => (
             <div key={i} style={{ background: c.bg, borderRadius: 12, padding: "16px 18px", border: `1.5px solid ${c.color}22` }}>
               <div style={{ fontSize: 20, marginBottom: 6 }}>{c.icon}</div>
               <div style={{ fontSize: 11, color: "#64748b", fontWeight: 600, textTransform: "uppercase" }}>{c.label}</div>
-              <div style={{ fontSize: 26, fontWeight: 800, color: c.color, marginTop: 4 }}>{c.value}</div>
+              <div style={{ fontSize: 24, fontWeight: 800, color: c.color, marginTop: 4 }}>{c.value}</div>
             </div>
           ))}
         </div>
@@ -281,7 +354,7 @@ const RebillReportPage = () => {
                 <span style={{ color: "#94a3b8", fontWeight: 500 }}> — filtered by {dateTypeLabel}</span>
               )}
             </span>
-            <span style={{ fontSize: 12, color: "#94a3b8" }}>Click a row to see rebill history (before/after amounts)</span>
+            <span style={{ fontSize: 12, color: "#94a3b8" }}>Click a row to see full rebill breakdown (Income / Balance / Service / Spare / Raw Spare / Others / Advance / Returns)</span>
           </div>
 
           {loading ? (
@@ -293,7 +366,7 @@ const RebillReportPage = () => {
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <thead>
                   <tr style={{ background: "#f1f5f9", color: "#475569" }}>
-                    {["#", "Job No", "Customer", "Contact", "Device", "Service Rep", "Engineer", "Status", "Rebills", "Current Income ₹", "Lifetime Income ₹"].map((h, i) => (
+                    {["#", "Job No", "Customer", "Contact", "Device", "Service Rep", "Engineer", "Status", "Rebills", "Current Income ₹", "Current Balance ₹", "Lifetime Income ₹"].map((h, i) => (
                       <th key={i} style={{ padding: "10px 12px", textAlign: "left", fontWeight: 600, borderBottom: "1px solid #e2e8f0", whiteSpace: "nowrap" }}>{h}</th>
                     ))}
                   </tr>
@@ -306,10 +379,22 @@ const RebillReportPage = () => {
                     const currIncome = Number(job.service?.income || 0);
                     const allTimeIncome = histIncome + currIncome;
                     const isExpanded = expandedId === job._id;
-                    const currentCycleSpare = Math.max(
-                      0,
-                      Number(job.service?.spareCharge || 0) - Number(job.service?.spareBaseline || 0)
-                    );
+
+                    // ✅ NEW — full current-cycle + lifetime-returned breakdown for this job
+                    const spareBaseline    = Number(job.service?.spareBaseline    || 0);
+                    const rawSpareBaseline = Number(job.service?.rawSpareBaseline || 0);
+                    const othersBaseline   = Number(job.service?.othersBaseline   || 0);
+                    const advanceBaseline  = Number(job.service?.advanceBaseline  || 0);
+
+                    const spareCycle    = getCycleTotals(job.spareItems,    spareBaseline);
+                    const rawSpareCycle = getCycleTotals(job.rawSpareItems, rawSpareBaseline);
+
+                    const currentCycleOthers  = Math.max(0, Number(job.service?.othersAmount  || 0) - othersBaseline);
+                    const currentCycleAdvance = Math.max(0, Number(job.service?.advanceAmount || 0) - advanceBaseline);
+
+                    const spareReturnedLifetime    = getLifetimeReturned(job.spareItems);
+                    const rawSpareReturnedLifetime = getLifetimeReturned(job.rawSpareItems);
+                    const hasAnyReturns = spareReturnedLifetime > 0 || rawSpareReturnedLifetime > 0;
 
                     return (
                       <React.Fragment key={job._id}>
@@ -337,16 +422,35 @@ const RebillReportPage = () => {
                             </span>
                           </td>
                           <td style={{ padding: "10px 12px", fontWeight: 600, color: "#0f172a" }}>{fmtCurrency(currIncome)}</td>
+                          <td style={{ padding: "10px 12px", fontWeight: 600, color: Number(job.service?.balance || 0) > 0 ? "#dc2626" : "#0f172a" }}>
+                            {fmtCurrency(job.service?.balance)}
+                          </td>
                           <td style={{ padding: "10px 12px", fontWeight: 700, color: "#6366f1" }}>{fmtCurrency(allTimeIncome)}</td>
                         </tr>
 
-                        {/* EXPANDED — REBILL HISTORY */}
+                        {/* EXPANDED — FULL REBILL BREAKDOWN */}
                         {isExpanded && (
                           <tr>
-                            <td colSpan={11} style={{ padding: "0 12px 12px 48px", background: "#f0f9ff" }}>
+                            <td colSpan={12} style={{ padding: "0 12px 12px 48px", background: "#f0f9ff" }}>
                               <div style={{ fontSize: 12, fontWeight: 700, color: "#1e40af", marginBottom: 8, marginTop: 8 }}>
-                                📋 Rebill history for {job.jobSheetNo} — each block shows Income / Service / Spare / Others for that cycle
+                                📋 Full breakdown for {job.jobSheetNo} — Income / Balance / Service / Spare / Raw Spare / Others / Advance for every cycle
                               </div>
+
+                              {/* ✅ NEW — lifetime returned summary (return history isn't stored
+                                  per past cycle, only the aggregate up to now, so this is shown
+                                  once for the whole job rather than repeated per cycle) */}
+                              {hasAnyReturns && (
+                                <div style={{
+                                  background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8,
+                                  padding: "8px 14px", marginBottom: 8, display: "flex", gap: 16, flexWrap: "wrap",
+                                  fontSize: 12, color: "#991b1b", fontWeight: 600,
+                                }}>
+                                  <span>↩ Returned so far (lifetime, all cycles):</span>
+                                  {spareReturnedLifetime > 0 && <span>Spare: {fmtCurrency(spareReturnedLifetime)}</span>}
+                                  {rawSpareReturnedLifetime > 0 && <span>Raw Spare: {fmtCurrency(rawSpareReturnedLifetime)}</span>}
+                                </div>
+                              )}
+
                               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                                 {job.rebillHistory.map((rb, ri) => (
                                   <div key={ri} style={{
@@ -364,15 +468,27 @@ const RebillReportPage = () => {
                                       <span style={{ color: "#0f172a", fontSize: 12, fontWeight: 700 }}>
                                         Income: {fmtCurrency(rb.income)}
                                       </span>
+                                      <span style={{ color: "#dc2626", fontSize: 12 }}>
+                                        Balance: <b>{fmtCurrency(rb.balance)}</b>
+                                      </span>
                                       <span style={{ color: "#475569", fontSize: 12 }}>
                                         Service: <b style={{ color: "#0f172a" }}>{fmtCurrency(rb.serviceCharge)}</b>
                                       </span>
                                       <span style={{ color: "#475569", fontSize: 12 }}>
                                         Spare: <b style={{ color: "#0f172a" }}>{fmtCurrency(rb.spareCharge)}</b>
                                       </span>
+                                      <span style={{ color: "#B45309", fontSize: 12 }}>
+                                        Raw Spare: <b>{fmtCurrency(rb.rawSpareCharge)}</b>
+                                      </span>
                                       <span style={{ color: "#475569", fontSize: 12 }}>
                                         Others: <b style={{ color: "#0f172a" }}>{fmtCurrency(rb.othersAmount)}</b>
                                       </span>
+                                      <span style={{ color: "#0369A1", fontSize: 12 }}>
+                                        Advance: <b>{fmtCurrency(rb.advanceAmount)}</b>
+                                      </span>
+                                      {rb.paymentMode && (
+                                        <span style={{ color: "#64748b", fontSize: 11 }}>💳 {rb.paymentMode}</span>
+                                      )}
                                       {rb.status && (
                                         <span style={{ background: statusStyle(rb.status).bg, color: statusStyle(rb.status).color, fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 12 }}>
                                           {rb.status}
@@ -403,15 +519,32 @@ const RebillReportPage = () => {
                                     <span style={{ color: "#0f172a", fontSize: 12, fontWeight: 700 }}>
                                       Income: {fmtCurrency(job.service?.income)}
                                     </span>
+                                    <span style={{ color: "#dc2626", fontSize: 12 }}>
+                                      Balance: <b>{fmtCurrency(job.service?.balance)}</b>
+                                    </span>
                                     <span style={{ color: "#475569", fontSize: 12 }}>
                                       Service: <b style={{ color: "#0f172a" }}>{fmtCurrency(job.service?.serviceCharge)}</b>
                                     </span>
                                     <span style={{ color: "#475569", fontSize: 12 }}>
-                                      Spare: <b style={{ color: "#0f172a" }}>{fmtCurrency(currentCycleSpare)}</b>
+                                      Spare: <b style={{ color: "#0f172a" }}>{fmtCurrency(spareCycle.activeTotal)}</b>
+                                    </span>
+                                    <span style={{ color: "#B45309", fontSize: 12 }}>
+                                      Raw Spare: <b>{fmtCurrency(rawSpareCycle.activeTotal)}</b>
                                     </span>
                                     <span style={{ color: "#475569", fontSize: 12 }}>
-                                      Others: <b style={{ color: "#0f172a" }}>{fmtCurrency(job.service?.othersAmount)}</b>
+                                      Others: <b style={{ color: "#0f172a" }}>{fmtCurrency(currentCycleOthers)}</b>
                                     </span>
+                                    <span style={{ color: "#0369A1", fontSize: 12 }}>
+                                      Advance: <b>{fmtCurrency(currentCycleAdvance)}</b>
+                                    </span>
+                                    {job.service?.paymentMode && (
+                                      <span style={{ color: "#64748b", fontSize: 11 }}>💳 {job.service.paymentMode}</span>
+                                    )}
+                                    {(spareCycle.returnedTotal > 0 || rawSpareCycle.returnedTotal > 0) && (
+                                      <span style={{ color: "#991B1B", fontSize: 12 }}>
+                                        ↩ Returned (this cycle): <b>{fmtCurrency(spareCycle.returnedTotal + rawSpareCycle.returnedTotal)}</b>
+                                      </span>
+                                    )}
                                     {job.device?.mobileStatus && (
                                       <span style={{ background: statusStyle(job.device.mobileStatus).bg, color: statusStyle(job.device.mobileStatus).color, fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 12 }}>
                                         {job.device.mobileStatus}

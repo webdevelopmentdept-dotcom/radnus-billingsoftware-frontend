@@ -95,6 +95,7 @@ const AllReportPage = () => {
       dates.push(toYMD(item.service.incomeDate));
     }
     (item.spareItems || []).forEach(si => { if (si.date) dates.push(toYMD(si.date)); });
+    (item.rawSpareItems || []).forEach(ri => { if (ri.date) dates.push(toYMD(ri.date)); });
     if (item.service?.advanceDate) dates.push(toYMD(item.service.advanceDate));
     return dates;
   };
@@ -171,9 +172,10 @@ const AllReportPage = () => {
      and the user re-enters fresh charges. The OLD cycle's amount is preserved
      only inside `service.revenueEntries[]` (one entry per cycle/date).
 
-     `service.spareCharge` does NOT have this problem — spareItems is cumulative
-     across every rebill, so spareCharge always already equals the full lifetime
-     total (see jobSheetController.js's rebill route comments).
+     `service.spareCharge` / `service.rawSpareCharge` do NOT have this problem —
+     spareItems/rawSpareItems are cumulative across every rebill, so they always
+     already equal the full lifetime total (see jobSheetController.js's rebill
+     route comments).
 
      This mirrors the exact same logic ValueReport.jsx's buildRows() already
      uses: if revenueEntries has data, sum it (= true lifetime total); otherwise
@@ -192,6 +194,37 @@ const AllReportPage = () => {
       : Number(item.service?.serviceCharge || 0);
   };
 
+  /* ================= NEW — BALANCE / RAW SPARE / SCALAR DATE HELPERS =================
+     Balance resets to 0 on every rebill (same as income/serviceCharge current-cycle
+     behaviour used across the other report pages), so `service.balance` IS already
+     the current, correct figure to show — no lifetime summing needed.
+
+     Raw Spare mirrors Spare exactly: rawSpareItems is cumulative across every
+     rebill, so service.rawSpareCharge already equals the full lifetime total.
+
+     ⚠️ ASSUMPTION: `service.balanceDate` and `service.othersDate` are read here the
+     same way `incomeDate` / `advanceDate` already are. If your job sheet schema
+     doesn't actually store those two date fields yet, these two columns will just
+     show "-" for every row (nothing will break) — sollu, adhukku schema field
+     add pannalam. */
+  const getBalanceTotal = (item) => Number(item.service?.balance || 0);
+  const getRawSpareTotal = (item) => Number(item.service?.rawSpareCharge || 0);
+
+  const fmtDate = (d) => (d ? new Date(d).toLocaleDateString("en-IN") : "-");
+  const getBalanceDateStr  = (item) => fmtDate(item.service?.balanceDate);
+  const getOthersDateStr   = (item) => fmtDate(item.service?.othersDate);
+
+  /* Latest transaction date for an items[] array (spareItems / rawSpareItems) —
+     used as the single "Spare Date" / "Raw Spare Date" column value. When there's
+     more than one dated entry the BreakdownPills below already show the full
+     per-date split, so this column just answers "when was the most recent one". */
+  const getLatestItemDate = (items) => {
+    const dated = (items || []).filter(i => i.date).map(i => new Date(i.date));
+    if (dated.length === 0) return "-";
+    const latest = new Date(Math.max(...dated.map(d => d.getTime())));
+    return latest.toLocaleDateString("en-IN");
+  };
+
   /* ================= PER-DATE BREAKDOWN HELPERS =================
      Returns [{ label: "01 Aug", amount: 1000 }, ...] for a given field, only
      when there's genuinely more than one date to show (single-cycle jobs
@@ -208,11 +241,14 @@ const AllReportPage = () => {
 
   const getIncomeBreakdown  = (item) => getBreakdown(item.service?.revenueEntries, "income");
   const getServiceBreakdown = (item) => getBreakdown(item.service?.revenueEntries, "service");
-  // spareItems isn't a "revenueEntries" ledger — it's the raw spare parts list,
-  // each with its own date/amount — so it needs its own small mapper.
+  // spareItems / rawSpareItems aren't a "revenueEntries" ledger — they're the raw
+  // parts lists, each with its own date/amount — so they need their own mapper.
   const getSpareBreakdown = (item) => {
     const list = (item.spareItems || [])
-      .filter(si => Number(si.amount || 0) > 0)
+      // ✅ FIX — Returned spares must not appear in the breakdown pills;
+      // they're excluded from the main "Spare ₹" total (service.spareCharge)
+      // so showing them here would make the pills not add up to the total.
+      .filter(si => Number(si.amount || 0) > 0 && !si.isReturned)
       .map(si => ({
         label: new Date(si.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }),
         amount: Number(si.amount),
@@ -220,7 +256,17 @@ const AllReportPage = () => {
       }));
     return list.length > 1 ? list : [];
   };
-
+  const getRawSpareBreakdown = (item) => {
+    const list = (item.rawSpareItems || [])
+      // ✅ FIX — same Returned-exclusion as getSpareBreakdown above.
+      .filter(ri => Number(ri.amount || 0) > 0 && !ri.isReturned)
+      .map(ri => ({
+        label: new Date(ri.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }),
+        amount: Number(ri.amount),
+        name: ri.name,
+      }));
+    return list.length > 1 ? list : [];
+  };
   /* ================= BREAKDOWN PILL LIST =================
      Small, compact "date → amount" chips shown under a total when a job has
      more than one transaction date (e.g. after a rebill). Kept visually light
@@ -271,11 +317,17 @@ const AllReportPage = () => {
       "Income ₹":           getIncomeTotal(item),
       "Income Date":        item.service?.incomeDate ? new Date(item.service.incomeDate).toLocaleDateString("en-IN") : "-",
       "Service ₹":          getServiceTotal(item),
+      "Balance ₹":          getBalanceTotal(item),
+      "Balance Date":       getBalanceDateStr(item),
       "Spare ₹":            Number(item.service?.spareCharge || 0),
+      "Spare Date":         getLatestItemDate(item.spareItems),
+      "Raw Spare ₹":        getRawSpareTotal(item),
+      "Raw Spare Date":     getLatestItemDate(item.rawSpareItems),
       "Others ₹":           Number(item.service?.othersAmount || 0),
+      "Others Date":        getOthersDateStr(item),
       "Advance ₹":          Number(item.service?.advanceAmount || 0),
       "Advance Date":       item.service?.advanceDate ? new Date(item.service.advanceDate).toLocaleDateString("en-IN") : "-",
-      "Total":              (getIncomeTotal(item) + Number(item.service?.spareCharge || 0)),
+      "Total":              (getIncomeTotal(item) + Number(item.service?.spareCharge || 0) + getRawSpareTotal(item)),
       "Payment Mode":       item.service?.paymentMode || "-",
       "Estimate":           item.service?.estimate || "-",
       "Repair Date":        item.service?.repairDate ? new Date(item.service.repairDate).toLocaleDateString("en-IN") : "-",
@@ -299,7 +351,13 @@ const AllReportPage = () => {
       { wch: 14 }, { wch: 16 },
       { wch: 17 }, { wch: 12 }, { wch: 16 }, { wch: 14 }, { wch: 16 },
       { wch: 12 },
-      { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 14 },
+      { wch: 12 }, { wch: 14 }, { wch: 12 },
+      { wch: 12 }, { wch: 14 },
+      { wch: 12 }, { wch: 14 },
+      { wch: 13 }, { wch: 14 },
+      { wch: 12 }, { wch: 14 },
+      { wch: 12 }, { wch: 14 },
+      { wch: 14 },
       { wch: 10 }, { wch: 13 },
       { wch: 14 }, { wch: 13 }, { wch: 14 }, { wch: 28 }, { wch: 28 },
       { wch: 22 }, { wch: 13 }, { wch: 12 }, { wch: 14 },
@@ -331,16 +389,23 @@ const AllReportPage = () => {
     return <span style={{ fontSize: 11 }}>{val}</span>;
   };
 
-  const totalService = filteredData.reduce((s, i) => s + getIncomeTotal(i), 0);
-  const totalSpare   = filteredData.reduce((s, i) => s + Number(i.service?.spareCharge || 0), 0);
-  const totalAmount  = totalService + totalSpare;
+  const totalService  = filteredData.reduce((s, i) => s + getIncomeTotal(i), 0);
+  const totalSpare    = filteredData.reduce((s, i) => s + Number(i.service?.spareCharge || 0), 0);
+  const totalRawSpare = filteredData.reduce((s, i) => s + getRawSpareTotal(i), 0);
+  const totalAmount   = totalService + totalSpare + totalRawSpare;
 
   const headers = [
     "SL", "Date", "Job No", "Name", "Contact", "Alt Contact",
     "District", "Taluk",
     "Make", "Model", "IMEI", "Warranty", "Status",
     "Engineer", "Service Rep", "Dealer", "Drawer",
-    "Income ₹", "Income Date", "Service ₹", "Spare ₹", "Others ₹", "Advance ₹", "Advance Date",
+    "Income ₹", "Income Date",
+    "Service ₹",
+    "Balance ₹", "Balance Date",
+    "Spare ₹", "Spare Date",
+    "Raw Spare ₹", "Raw Spare Date",
+    "Others ₹", "Others Date",
+    "Advance ₹", "Advance Date",
     "Total ₹", "Payment",
     "Problems", "Physical Cond.", "Accessories",
     "Repair Date", "Delivery Date", "Margin ₹", "Remarks",
@@ -397,7 +462,7 @@ const AllReportPage = () => {
             </select>
           </div>
 
-          {/* ===== NEW: Service Rep filter, options auto-pulled from data ===== */}
+          {/* ===== Service Rep filter, options auto-pulled from data ===== */}
           <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
             <label style={labelStyle}>Service Rep</label>
             <select value={filters.serviceRep} onChange={e => setFilters({ ...filters, serviceRep: e.target.value })}
@@ -415,7 +480,7 @@ const AllReportPage = () => {
               style={{ ...inputStyle, width: "130px" }} />
           </div>
 
-          {/* ===== NEW: Created vs Transaction date toggle ===== */}
+          {/* ===== Created vs Transaction date toggle ===== */}
           <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
             <label style={labelStyle}>Filter By</label>
             <select value={filters.dateType} onChange={e => setFilters({ ...filters, dateType: e.target.value })}
@@ -494,10 +559,11 @@ const AllReportPage = () => {
                 </td></tr>
               ) : filteredData.length > 0 ? (
                 filteredData.map((item, index) => {
-                  const svc   = getIncomeTotal(item);
-                  const spare = Number(item.service?.spareCharge || 0);
-                  const rowBg = index % 2 === 0 ? "#fff" : "#f8fafc";
-                  const td    = { padding: "8px 8px", borderBottom: "1px solid #e2e8f0", borderRight: "1px solid #e2e8f0", whiteSpace: "nowrap", color: "#1e293b" };
+                  const svc      = getIncomeTotal(item);
+                  const spare    = Number(item.service?.spareCharge || 0);
+                  const rawSpare = getRawSpareTotal(item);
+                  const rowBg    = index % 2 === 0 ? "#fff" : "#f8fafc";
+                  const td       = { padding: "8px 8px", borderBottom: "1px solid #e2e8f0", borderRight: "1px solid #e2e8f0", whiteSpace: "nowrap", color: "#1e293b" };
                   return (
                     <tr key={index}
                       style={{ background: rowBg, cursor: "pointer" }}
@@ -541,17 +607,38 @@ const AllReportPage = () => {
                       <td style={td}>
                         {item.service?.incomeDate ? new Date(item.service.incomeDate).toLocaleDateString("en-IN") : "-"}
                       </td>
+
                       <td style={{ ...td, whiteSpace: "normal", verticalAlign: "top" }}>
                         {getServiceTotal(item) ? `₹${getServiceTotal(item).toLocaleString("en-IN")}` : "-"}
                         <BreakdownPills items={getServiceBreakdown(item)} color="#1e293b" />
                       </td>
+
+                      {/* NEW — Balance ₹ / Balance Date */}
+                      <td style={{ ...td, color: getBalanceTotal(item) > 0 ? "#dc2626" : "#1e293b", fontWeight: 600 }}>
+                        {getBalanceTotal(item) ? `₹${getBalanceTotal(item).toLocaleString("en-IN")}` : "-"}
+                      </td>
+                      <td style={td}>{getBalanceDateStr(item)}</td>
+
                       <td style={{ ...td, whiteSpace: "normal", verticalAlign: "top" }}>
                         {spare ? `₹${spare.toLocaleString("en-IN")}` : "-"}
                         <BreakdownPills items={getSpareBreakdown(item)} color="#7e22ce" />
                       </td>
+                      {/* NEW — Spare Date */}
+                      <td style={td}>{getLatestItemDate(item.spareItems)}</td>
+
+                      {/* NEW — Raw Spare ₹ / Raw Spare Date */}
+                      <td style={{ ...td, whiteSpace: "normal", verticalAlign: "top", color: "#b45309" }}>
+                        {rawSpare ? `₹${rawSpare.toLocaleString("en-IN")}` : "-"}
+                        <BreakdownPills items={getRawSpareBreakdown(item)} color="#b45309" />
+                      </td>
+                      <td style={td}>{getLatestItemDate(item.rawSpareItems)}</td>
+
                       <td style={td}>
                         {item.service?.othersAmount ? `₹${Number(item.service.othersAmount).toLocaleString("en-IN")}` : "-"}
                       </td>
+                      {/* NEW — Others Date */}
+                      <td style={td}>{getOthersDateStr(item)}</td>
+
                       <td style={{ ...td, color: "#0d6efd", fontWeight: 600 }}>
                         {item.service?.advanceAmount ? `₹${Number(item.service.advanceAmount).toLocaleString("en-IN")}` : "-"}
                       </td>
@@ -559,7 +646,7 @@ const AllReportPage = () => {
                         {item.service?.advanceDate ? new Date(item.service.advanceDate).toLocaleDateString("en-IN") : "-"}
                       </td>
 
-                      <td style={{ ...td, color: "#059669", fontWeight: 700 }}>₹{(svc + spare).toLocaleString("en-IN")}</td>
+                      <td style={{ ...td, color: "#059669", fontWeight: 700 }}>₹{(svc + spare + rawSpare).toLocaleString("en-IN")}</td>
                       <td style={td}>{item.service?.paymentMode || "-"}</td>
                       <td style={{ ...td, maxWidth: "160px", whiteSpace: "normal", wordBreak: "break-word" }}>{item.visualIssues?.filter(Boolean).join(", ") || "-"}</td>
                       <td style={{ ...td, maxWidth: "160px", whiteSpace: "normal", wordBreak: "break-word" }}>{item.physicalCondition?.join(", ") || "-"}</td>
@@ -586,7 +673,7 @@ const AllReportPage = () => {
             {filteredData.length > 0 && (
               <tfoot>
                 <tr style={{ background: "#1e293b", color: "#fff", fontWeight: 700 }}>
-                  <td colSpan="23" style={{ padding: "10px 8px", textAlign: "right", fontSize: "12px" }}>
+                  <td colSpan="30" style={{ padding: "10px 8px", textAlign: "right", fontSize: "12px" }}>
                     TOTAL ({filteredData.length} records):
                   </td>
                   <td style={{ padding: "10px 8px", color: "#6ee7b7" }}>₹{totalAmount.toLocaleString("en-IN")}</td>

@@ -168,9 +168,11 @@ const SpareReportPage = () => {
       if (applied.status && status !== applied.status) return;
 
       const pushEntry = (si, entryType, rawStatus = null) => {
-        // ✅ NEW — a Spare Used item that was Returned in the Spare popup must
-        // NOT show up in the Spare Report at all (it's no longer billed).
-        if (entryType === "Used Spare" && si.isReturned) return;
+        // ✅ a Spare Used item that was Returned in the Spare popup, OR a Raw
+        // Spare purchase-log entry that was Returned in the Raw Spare popup
+        // (e.g. sent back to the supplier) — either way it must NOT show up
+        // in the Spare Report at all (it's no longer billed / no longer stock).
+        if (si.isReturned) return;
 
         const amt = Number(si.amount || 0);
         if (amt <= 0) return;
@@ -215,7 +217,12 @@ const SpareReportPage = () => {
         }
       });
       const remainingUsedByName = { ...usedFromStockByName };
-      (item.rawSpareItems || []).forEach((ri) => {
+      // ✅ a Returned raw-spare purchase never counts as stock (it went back
+      // to the supplier), so it's skipped entirely here — pushEntry's own
+      // isReturned check above would drop it anyway, but skipping it here
+      // too keeps it out of the Available/Used/Partially Used math for the
+      // OTHER (still-active) raw spare entries of the same name.
+      (item.rawSpareItems || []).filter((ri) => !ri.isReturned).forEach((ri) => {
         const key = (ri.name || "").trim();
         const qty = Number(ri.qty || 0);
         let usedQty = 0;

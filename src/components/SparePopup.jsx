@@ -50,21 +50,45 @@ const iconBtnStyle = {
    ✅ RAW STOCK LINKING — a spare already logged in Raw Spare can be billed
    here via "From Raw Stock" instead of typed in again as a fresh Market item.
    The Spare Name dropdown then only shows names with stock left, qty is
-   capped, and — NEW in this update — Rate is AUTO-FILLED from the weighted
-   average purchase rate of that spare's Raw Spare entries, so the person
-   never has to type Rate/Amount again — just pick the spare, adjust Qty if
-   needed, pick a Date, and Add Item.
+   capped, and Rate is AUTO-FILLED from the weighted average purchase rate of
+   that spare's Raw Spare entries, so the person never has to type Rate/
+   Amount again — just pick the spare, adjust Qty if needed, pick a Date, and
+   Add Item.
 
    ✅ DEFAULT MODE — this popup now opens in "From Raw Stock" mode by default
    whenever there is any stock left to bill from. It only defaults to
-   "Market Purchase" when there's nothing in Raw Stock to pull from. */
+   "Market Purchase" when there's nothing in Raw Stock to pull from.
+
+   ✅ REAL TWO-WAY RETURN SYNC — this popup keeps its own LIVE copy of Raw
+   Spare's purchase log (`rawItems`, seeded from the `existingRawItems`
+   prop). When a "From Raw Stock" Spare Used item is Returned here, the
+   matching Raw Spare purchase entry (matched by name, then narrowed by
+   exact qty when possible) is marked Returned in that same local copy —
+   and un-marked again on Undo. On Save, this popup writes the synced
+   `rawItems` array back up to the job via `setRawSpareItems` (the SAME
+   setter the Raw Spare popup itself uses), so both popups end up sharing
+   one consistent, persisted Return state. A Returned raw purchase entry is
+   excluded from every "available stock" / weighted-average-rate /
+   default-source-mode calculation below — exactly the same way an
+   already-consumed unit is excluded.
+
+   ✅ FIX — double entry in Spare Return Report. A synced raw entry (marked
+   Returned automatically because its matching Spare Used item was
+   returned) is now tagged `syncedReturn: true`. The report page uses this
+   to skip it on the "Raw Spare" side, since it's already shown once under
+   "Spare Used" — same physical return, one row instead of two. Undo clears
+   the flag back to false. A raw entry Returned directly inside
+   RawSparePopup (a genuine standalone purchase return, never used on a
+   job) never gets this flag, so it still shows correctly as its own
+   "Raw Spare" row. */
 const SparePopup = ({
   onClose,
   setSpareCharge,
   setSpareItems,
   existingItems = [],
   spareBaselineAmount = 0,
-  existingRawItems = [],   // Raw Spare's purchase log (read-only here)
+  existingRawItems = [],   // Raw Spare's purchase log (seed for local live copy)
+  setRawSpareItems,        // ✅ NEW — writes synced Return state back to Raw Spare on Save
 }) => {
   const today = new Date().toISOString().split("T")[0];
   const API = import.meta.env.VITE_API_URL;
@@ -115,12 +139,21 @@ const SparePopup = ({
   const [date, setDate] = useState(today);
   const [items, setItems] = useState(existingItems);
 
-  /* ✅ NEW — purchase info per raw-spare name: total qty bought AND total
-     amount spent, so we can compute a weighted-average rate to auto-fill.
-     Raw Spare's own purchase log (existingRawItems) is NEVER modified here. */
+  // ✅ NEW — local, LIVE copy of Raw Spare's purchase log. Return/Undo done
+  // here mutates this copy directly (two-way sync); Save writes it back up
+  // via setRawSpareItems. Raw Spare's own popup, when opened separately,
+  // still works exactly the same off the same underlying job state.
+  const [rawItems, setRawItems] = useState(existingRawItems);
+
+  /* ✅ purchase info per raw-spare name: total qty bought AND total amount
+     spent, so we can compute a weighted-average rate to auto-fill.
+     A Returned raw purchase entry is skipped entirely: it was sent back and
+     is no longer real stock, so it can't be billed From Raw Stock and
+     shouldn't pull down/skew the weighted-average rate either. */
   const rawStockInfoMap = useMemo(() => {
     const map = {};
-    (existingRawItems || []).forEach((r) => {
+    (rawItems || []).forEach((r) => {
+      if (r.isReturned) return; // returned purchase — not stock anymore
       const key = (r.name || "").trim();
       if (!key) return;
       if (!map[key]) map[key] = { totalQty: 0, totalAmount: 0 };
@@ -128,7 +161,7 @@ const SparePopup = ({
       map[key].totalAmount += Number(r.amount || 0);
     });
     return map;
-  }, [existingRawItems]);
+  }, [rawItems]);
 
   const rawStockQtyMap = useMemo(() => {
     const map = {};
@@ -137,11 +170,15 @@ const SparePopup = ({
   }, [rawStockInfoMap]);
 
   /* total qty already billed as Spare Used with source:"raw" on THIS job
-     sheet so far (across cycles — a spare already consumed stays consumed). */
+     sheet so far (across cycles — a spare already consumed stays consumed).
+     A Returned raw-sourced item stops counting as "used" — the moment it's
+     marked Returned, that qty is automatically available again for
+     "From Raw Stock" billing — no save/reload needed. */
   const usedFromStockQtyMap = useMemo(() => {
     const map = {};
     items.forEach((it) => {
       if (it.source !== "raw") return;
+      if (it.isReturned) return; // returned — no longer actually consuming stock
       const key = (it.name || "").trim();
       if (!key) return;
       map[key] = (map[key] || 0) + Number(it.qty || 0);
@@ -156,7 +193,8 @@ const SparePopup = ({
     return Math.max(0, purchased - used);
   };
 
-  /* ✅ NEW — weighted-average purchase rate for a raw-stock spare name */
+  /* weighted-average purchase rate for a raw-stock spare name (returned
+     purchases already excluded via rawStockInfoMap above) */
   const getAvgRawRate = (spareName) => {
     const key = (spareName || "").trim();
     const info = rawStockInfoMap[key];
@@ -169,13 +207,17 @@ const SparePopup = ({
     .sort((a, b) => a.localeCompare(b))
     .map((n) => ({ label: `${n}  (Available: ${getAvailableStock(n)})`, value: n }));
 
-  /* ✅ NEW — default to "From Raw Stock" whenever there IS stock to bill
-     from; only fall back to "Market Purchase" when there's none. Computed
-     once, lazily, at mount — reads existingRawItems/existingItems directly
-     (not the memoized maps above, which don't exist yet at this point). */
+  /* ✅ default to "From Raw Stock" whenever there IS stock to bill from;
+     only fall back to "Market Purchase" when there's none. Computed once,
+     lazily, at mount — reads existingRawItems/existingItems props directly
+     (not the memoized maps above, which don't exist yet at this point).
+     Returned raw purchases excluded from "purchased" here too, so a job
+     whose only Raw Spare entry was Returned correctly falls back to Market
+     Purchase instead of showing a phantom "stock available". */
   const computeInitialSourceMode = () => {
     const purchased = {};
     (existingRawItems || []).forEach((r) => {
+      if (r.isReturned) return; // returned purchase — not stock anymore
       const k = (r.name || "").trim();
       if (!k) return;
       purchased[k] = (purchased[k] || 0) + Number(r.qty || 0);
@@ -183,6 +225,7 @@ const SparePopup = ({
     const used = {};
     (existingItems || []).forEach((it) => {
       if (it.source !== "raw") return;
+      if (it.isReturned) return; // returned — no longer consuming stock
       const k = (it.name || "").trim();
       if (!k) return;
       used[k] = (used[k] || 0) + Number(it.qty || 0);
@@ -306,6 +349,27 @@ const SparePopup = ({
     setReturnReasonInput("");
   };
 
+  /* ✅ NEW — helper: given a Spare Used item sourced "raw", find the index
+     in `rawList` of the Raw Spare purchase entry it should sync with.
+     Matches by name first, then narrows to an exact qty match when one
+     exists (falls back to the first available match on that name
+     otherwise). `wantReturned` picks whether we're looking for an entry
+     to mark Returned (must currently be active) or to bring back Active
+     (must currently be Returned) — used by confirmReturn/undoReturn below. */
+  const findMatchingRawIndex = (rawList, targetName, targetQty, wantCurrentlyReturned) => {
+    const key = (targetName || "").trim();
+    let fallback = -1;
+    let exactQty = -1;
+    for (let i = 0; i < rawList.length; i++) {
+      const r = rawList[i];
+      if ((r.name || "").trim() !== key) continue;
+      if (Boolean(r.isReturned) !== wantCurrentlyReturned) continue;
+      if (fallback === -1) fallback = i;
+      if (Number(r.qty) === Number(targetQty)) { exactQty = i; break; }
+    }
+    return exactQty !== -1 ? exactQty : fallback;
+  };
+
   const confirmReturn = () => {
     if (selectedIndices.length === 0) return;
     if (!returnDateInput) {
@@ -313,6 +377,31 @@ const SparePopup = ({
       return;
     }
     const chosenSet = new Set(selectedIndices);
+
+    // ✅ NEW — two-way sync: any selected item billed "From Raw Stock" also
+    // marks its matching Raw Spare purchase entry as Returned. Tagged with
+    // syncedReturn: true so the Spare Return Report can tell this apart
+    // from a standalone Raw Spare return and skip it there (it's already
+    // shown once, under Spare Used) — avoids the double-entry bug.
+    setRawItems(prevRaw => {
+      const rawCopy = [...prevRaw];
+      selectedIndices.forEach((idx) => {
+        const it = items[idx];
+        if (!it || it.source !== "raw") return;
+        const matchIdx = findMatchingRawIndex(rawCopy, it.name, it.qty, false);
+        if (matchIdx !== -1) {
+          rawCopy[matchIdx] = {
+            ...rawCopy[matchIdx],
+            isReturned: true,
+            returnDate: returnDateInput,
+            returnReason: returnReasonInput.trim() || "Returned via Spare Used",
+            syncedReturn: true,
+          };
+        }
+      });
+      return rawCopy;
+    });
+
     setItems(prev => prev.map((it, i) =>
       chosenSet.has(i)
         ? { ...it, isReturned: true, returnDate: returnDateInput, returnReason: returnReasonInput.trim() }
@@ -327,10 +416,25 @@ const SparePopup = ({
   };
 
   const undoReturn = (index) => {
-    setItems(prev => prev.map((it, i) =>
+    const it = items[index];
+
+    // ✅ NEW — reverse sync: bring the matching Raw Spare entry back Active,
+    // and clear syncedReturn since it's no longer a returned entry at all.
+    if (it && it.source === "raw") {
+      setRawItems(prevRaw => {
+        const rawCopy = [...prevRaw];
+        const matchIdx = findMatchingRawIndex(rawCopy, it.name, it.qty, true);
+        if (matchIdx !== -1) {
+          rawCopy[matchIdx] = { ...rawCopy[matchIdx], isReturned: false, returnDate: null, returnReason: "", syncedReturn: false };
+        }
+        return rawCopy;
+      });
+    }
+
+    setItems(prev => prev.map((it2, i) =>
       i === index
-        ? { ...it, isReturned: false, returnDate: null, returnReason: "" }
-        : it
+        ? { ...it2, isReturned: false, returnDate: null, returnReason: "" }
+        : it2
     ));
     showFeedback("success", "Return undone");
   };
@@ -419,6 +523,7 @@ const SparePopup = ({
   const handleSave = () => {
     setSpareCharge(cumulativeTotal);
     setSpareItems(items);
+    if (setRawSpareItems) setRawSpareItems(rawItems); // ✅ NEW — write synced raw state back
     onClose();
   };
 
@@ -506,8 +611,7 @@ const SparePopup = ({
           </div>
           <div style={addCard}>
 
-            {/* ✅ CHANGED — "From Raw Stock" now shown FIRST since it's the default,
-                emoji replaced with lucide icons */}
+            {/* "From Raw Stock" shown FIRST since it's the default */}
             <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
               <button
                 type="button"
@@ -565,7 +669,7 @@ const SparePopup = ({
                       setName(selected.value);
                       setAddingNewMode(false);
                       setCustomName("");
-                      // ✅ NEW — auto-fill Rate from Raw Spare's own purchase cost,
+                      // auto-fill Rate from Raw Spare's own purchase cost,
                       // and default Qty to 1 (capped later by availability check)
                       if (sourceMode === "raw") {
                         const avgRate = getAvgRawRate(selected.value);

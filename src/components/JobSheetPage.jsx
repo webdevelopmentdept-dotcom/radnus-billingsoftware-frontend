@@ -1013,17 +1013,29 @@ const today = new Date().toLocaleDateString("en-CA");
     setServiceCharge(remaining > 0 ? String(remaining) : "0");
   }, [income, spareCharge, othersAmount]);
 
-  useEffect(() => {
-    const total = (spareItems || []).reduce((s, it) => s + Number(it.amount || 0), 0);
-    setSpareCharge(String(total));
-  }, [spareItems]);
+ useEffect(() => {
+  // ✅ FIX — was summing ALL items including Returned ones, so a Returned
+  // spare kept inflating spareCharge (and the Spare Used field) even after
+  // the popup itself correctly showed ₹0. Exclude isReturned, matching the
+  // same total SparePopup's own handleSave already computes.
+  const total = (spareItems || [])
+    .filter((it) => !it.isReturned)
+    .reduce((s, it) => s + Number(it.amount || 0), 0);
+  setSpareCharge(String(total));
+}, [spareItems]);
 
   // ✅ Raw Spare total — accumulates exactly like Spare Charges, from rawSpareItems
   const [rawSpareCharge, setRawSpareCharge] = useState("");
-  useEffect(() => {
-    const total = (rawSpareItems || []).reduce((s, it) => s + Number(it.amount || 0), 0);
-    setRawSpareCharge(String(total));
-  }, [rawSpareItems]);
+useEffect(() => {
+  // ✅ FIX — same bug as spareCharge above: was summing every rawSpareItems
+  // entry regardless of Return status, so a Returned raw purchase kept
+  // showing up in the "Raw Spare (Raw)" field even though the popup itself
+  // correctly showed ₹0 Raw Spare Total.
+  const total = (rawSpareItems || [])
+    .filter((it) => !it.isReturned)
+    .reduce((s, it) => s + Number(it.amount || 0), 0);
+  setRawSpareCharge(String(total));
+}, [rawSpareItems]);
   /* ================= VISUAL ISSUES ================= */
   const addIssue = () => setVisualIssues([...visualIssues, ""]);
   const updateIssue = (i, val) => {
