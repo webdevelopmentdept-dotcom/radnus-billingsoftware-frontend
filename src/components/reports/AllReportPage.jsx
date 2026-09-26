@@ -194,21 +194,13 @@ const AllReportPage = () => {
       : Number(item.service?.serviceCharge || 0);
   };
 
-  /* ================= NEW — BALANCE / RAW SPARE / SCALAR DATE HELPERS =================
-     Balance resets to 0 on every rebill (same as income/serviceCharge current-cycle
-     behaviour used across the other report pages), so `service.balance` IS already
-     the current, correct figure to show — no lifetime summing needed.
+const getBalanceTotal = (item) => Number(item.service?.balance || 0);
 
-     Raw Spare mirrors Spare exactly: rawSpareItems is cumulative across every
-     rebill, so service.rawSpareCharge already equals the full lifetime total.
 
-     ⚠️ ASSUMPTION: `service.balanceDate` and `service.othersDate` are read here the
-     same way `incomeDate` / `advanceDate` already are. If your job sheet schema
-     doesn't actually store those two date fields yet, these two columns will just
-     show "-" for every row (nothing will break) — sollu, adhukku schema field
-     add pannalam. */
-  const getBalanceTotal = (item) => Number(item.service?.balance || 0);
-  const getRawSpareTotal = (item) => Number(item.service?.rawSpareCharge || 0);
+const getRawSpareTotal = (item) =>
+  (item.rawSpareItems || [])
+    .filter((ri) => !ri.isReturned)
+    .reduce((s, ri) => s + Number(ri.amount || 0), 0);
 
   const fmtDate = (d) => (d ? new Date(d).toLocaleDateString("en-IN") : "-");
   const getBalanceDateStr  = (item) => fmtDate(item.service?.balanceDate);

@@ -1161,18 +1161,24 @@ useEffect(() => {
       formData.append("accessories", JSON.stringify(accessories.filter(v => v !== "__custom")));
       formData.append("advanceItems", JSON.stringify(advanceItems));
       formData.append("visualIssues", JSON.stringify(visualIssues.filter(Boolean)));
-    formData.append("service", JSON.stringify({
+   formData.append("service", JSON.stringify({
   engineer,
   dealer, drawer, serviceRep,
   serviceCharge: Number(serviceCharge || 0),
   spareCharge: Number(spareCharge || 0),
-  spareBaseline: spareBaselineRef.current,   // 👈 இந்த ஒரு line add பண்ணு
-    rawSpareBaseline: rawSpareBaselineRef.current,   // ✅ NEW — must be carried through every
-                                                      // Update or the backend wipes it, and Raw
-                                                      // Spare would show its full lifetime total
-                                                      // again after the very next Update.
-    advanceBaseline: advanceBaselineRef.current, 
-    othersBaseline: othersBaselineRef.current,   // ✅ NEW
+  rawSpareCharge: Number(rawSpareCharge || 0),   // ✅ NEW — this was missing, so
+                                                  // service.rawSpareCharge never got
+                                                  // saved to DB, so Reports (All
+                                                  // Report, ServiceRep Report) that
+                                                  // read this field always showed
+                                                  // stale/blank Raw Spare, even
+                                                  // though the Job Sheet page itself
+                                                  // showed the correct live value
+                                                  // (computed from rawSpareItems).
+  spareBaseline: spareBaselineRef.current,
+  rawSpareBaseline: rawSpareBaselineRef.current,
+  advanceBaseline: advanceBaselineRef.current, 
+  othersBaseline: othersBaselineRef.current,
   income: incomeNum,
   incomeDate: finalIncomeDate,
   balance: balanceNum,
@@ -1279,20 +1285,19 @@ useEffect(() => {
       formData.append("accessories", JSON.stringify(accessories.filter(v => v !== "__custom")));
       formData.append("advanceItems", JSON.stringify(advanceItems));
       formData.append("visualIssues", JSON.stringify(visualIssues.filter(Boolean)));
-         formData.append("service", JSON.stringify({
+             formData.append("service", JSON.stringify({
         engineer,
         dealer, drawer, serviceRep,
         instaFollowers,
         googleReview, advanceDate,
         serviceCharge: Number(serviceCharge || 0),
         spareCharge: Number(spareCharge || 0),
+        rawSpareCharge: Number(rawSpareCharge || 0),   // ✅ NEW — same fix, missing on Save too
         income: incomeNum,
         incomeDate: finalIncomeDate,
         balance: balanceNum,
         balanceDate: finalBalanceDate,
         othersAmount: Number(othersAmount || 0),
-
-      
         othersItems,
         paymentMode, repairDate, deliveryDate, remarks,
         advanceAmount: Number(advanceAmount || 0),
