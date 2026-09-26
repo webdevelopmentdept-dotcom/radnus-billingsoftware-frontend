@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import axios from "axios";
 import Select from "react-select";
-import { Wrench, X, Plus, Pencil, Trash2, Check, ListPlus, RotateCcw, Undo2 } from "lucide-react";
+import { Wrench, X, Plus, Pencil, Trash2, Check, ListPlus, RotateCcw, Undo2, Package, Store } from "lucide-react";
 
 /* ================= THEME (matches rest of app) ================= */
 const BLUE = "#2563EB";
@@ -9,6 +9,8 @@ const BLUE_SOFT_BG = "#EFF6FF";
 const GREEN = "#16A34A";
 const RED = "#DC2626";
 const RED_SOFT_BG = "#FEF2F2";
+const AMBER = "#D97706";
+const AMBER_SOFT_BG = "#FFFBEB";
 const GRAY_TEXT = "#6B7280";
 const BORDER = "#E5E7EB";
 
@@ -43,54 +45,42 @@ const iconBtnStyle = {
    spareBaselineRef.current, which is itself loaded from service.spareBaseline
    saved by the backend /rebill route). This popup walks the items array IN
    ORDER and marks an item "before rebill" as long as the running sum-so-far
-   is still under this baseline. This is AMOUNT-based, not date-based — a
-   spare item's user-typed date has no guaranteed relationship to the exact
-   real-world moment rebill was clicked, so date comparison was unreliable
-   (see chat history). Amount-based split is exact because spareBaseline is
-   captured as a precise snapshot of cumulativeTotal at rebill time.
+   is still under this baseline.
 
-   ✅ NEW — SPARE RETURN (moved here from RawSparePopup): a spare that was
-   fitted & billed to the customer but turns out defective / doesn't fix the
-   issue can be marked "Returned" instead of deleted. Returned items:
-     - stay in the list (full history preserved, with a chosen return DATE
-       + an optional remark)
-     - are EXCLUDED from the Spare Used Total (customer isn't billed for it)
-     - can be Undone if marked by mistake
-   Unlike the old RawSparePopup version, the return date is NOT forced to
-   "today" — you pick it. You can also select several items with the
-   checkboxes and return them all together in one go, instead of one at a
-   time. */
+   ✅ RAW STOCK LINKING — a spare already logged in Raw Spare can be billed
+   here via "From Raw Stock" instead of typed in again as a fresh Market item.
+   The Spare Name dropdown then only shows names with stock left, qty is
+   capped, and — NEW in this update — Rate is AUTO-FILLED from the weighted
+   average purchase rate of that spare's Raw Spare entries, so the person
+   never has to type Rate/Amount again — just pick the spare, adjust Qty if
+   needed, pick a Date, and Add Item.
+
+   ✅ DEFAULT MODE — this popup now opens in "From Raw Stock" mode by default
+   whenever there is any stock left to bill from. It only defaults to
+   "Market Purchase" when there's nothing in Raw Stock to pull from. */
 const SparePopup = ({
   onClose,
   setSpareCharge,
   setSpareItems,
   existingItems = [],
   spareBaselineAmount = 0,
+  existingRawItems = [],   // Raw Spare's purchase log (read-only here)
 }) => {
   const today = new Date().toISOString().split("T")[0];
   const API = import.meta.env.VITE_API_URL;
 
-  // ✅ searchable master list of spare names (backend-driven, shared with
-  // RawSparePopup via the same /api/spares endpoint)
   const [spareList, setSpareList] = useState([]);
-
-  // ✅ Manage Spares panel — separate from the Select dropdown so edit/delete
-  // clicks are plain DOM buttons, not fighting react-select's own click handling.
   const [showManage, setShowManage] = useState(false);
 
-  // ✅ In-app feedback banner — replaces window.alert()
-  const [feedback, setFeedback] = useState(null); // { type: 'error' | 'success', text }
+  const [feedback, setFeedback] = useState(null);
   const showFeedback = (type, text) => {
     setFeedback({ type, text });
     window.clearTimeout(showFeedback._t);
     showFeedback._t = window.setTimeout(() => setFeedback(null), 3000);
   };
 
-  // ✅ Inline rename — replaces window.prompt()
   const [editingId, setEditingId] = useState(null);
   const [editValue, setEditValue] = useState("");
-
-  // ✅ Inline delete confirm — replaces window.confirm()
   const [deletingId, setDeletingId] = useState(null);
 
   const fetchSpares = () => {
@@ -103,15 +93,13 @@ const SparePopup = ({
     fetchSpares();
   }, []);
 
-  // ✅ FIX — auto-close the Manage panel once the list becomes empty, so a stray
-  // "No spares saved yet" box never lingers on screen with no toggle to dismiss it.
   useEffect(() => {
     if (spareList.length === 0 && showManage) setShowManage(false);
   }, [spareList.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const spareOptions = [
     ...spareList.map(s => ({ label: s.name, value: s.name })),
-    { label: "Add New Spare", value: "__custom" },
+    { label: "Others (Add New)", value: "__custom" },
   ];
 
   /* ===================================================================
@@ -127,8 +115,85 @@ const SparePopup = ({
   const [date, setDate] = useState(today);
   const [items, setItems] = useState(existingItems);
 
-  /* ✅ NEW — return selection + bulk return bar state */
-  const [selectedIndices, setSelectedIndices] = useState([]); // indices into `items`
+  /* ✅ NEW — purchase info per raw-spare name: total qty bought AND total
+     amount spent, so we can compute a weighted-average rate to auto-fill.
+     Raw Spare's own purchase log (existingRawItems) is NEVER modified here. */
+  const rawStockInfoMap = useMemo(() => {
+    const map = {};
+    (existingRawItems || []).forEach((r) => {
+      const key = (r.name || "").trim();
+      if (!key) return;
+      if (!map[key]) map[key] = { totalQty: 0, totalAmount: 0 };
+      map[key].totalQty += Number(r.qty || 0);
+      map[key].totalAmount += Number(r.amount || 0);
+    });
+    return map;
+  }, [existingRawItems]);
+
+  const rawStockQtyMap = useMemo(() => {
+    const map = {};
+    Object.keys(rawStockInfoMap).forEach((k) => { map[k] = rawStockInfoMap[k].totalQty; });
+    return map;
+  }, [rawStockInfoMap]);
+
+  /* total qty already billed as Spare Used with source:"raw" on THIS job
+     sheet so far (across cycles — a spare already consumed stays consumed). */
+  const usedFromStockQtyMap = useMemo(() => {
+    const map = {};
+    items.forEach((it) => {
+      if (it.source !== "raw") return;
+      const key = (it.name || "").trim();
+      if (!key) return;
+      map[key] = (map[key] || 0) + Number(it.qty || 0);
+    });
+    return map;
+  }, [items]);
+
+  const getAvailableStock = (spareName) => {
+    const key = (spareName || "").trim();
+    const purchased = rawStockQtyMap[key] || 0;
+    const used = usedFromStockQtyMap[key] || 0;
+    return Math.max(0, purchased - used);
+  };
+
+  /* ✅ NEW — weighted-average purchase rate for a raw-stock spare name */
+  const getAvgRawRate = (spareName) => {
+    const key = (spareName || "").trim();
+    const info = rawStockInfoMap[key];
+    if (!info || info.totalQty <= 0) return 0;
+    return Math.round((info.totalAmount / info.totalQty) * 100) / 100;
+  };
+
+  const rawStockOptions = Object.keys(rawStockQtyMap)
+    .filter((n) => getAvailableStock(n) > 0)
+    .sort((a, b) => a.localeCompare(b))
+    .map((n) => ({ label: `${n}  (Available: ${getAvailableStock(n)})`, value: n }));
+
+  /* ✅ NEW — default to "From Raw Stock" whenever there IS stock to bill
+     from; only fall back to "Market Purchase" when there's none. Computed
+     once, lazily, at mount — reads existingRawItems/existingItems directly
+     (not the memoized maps above, which don't exist yet at this point). */
+  const computeInitialSourceMode = () => {
+    const purchased = {};
+    (existingRawItems || []).forEach((r) => {
+      const k = (r.name || "").trim();
+      if (!k) return;
+      purchased[k] = (purchased[k] || 0) + Number(r.qty || 0);
+    });
+    const used = {};
+    (existingItems || []).forEach((it) => {
+      if (it.source !== "raw") return;
+      const k = (it.name || "").trim();
+      if (!k) return;
+      used[k] = (used[k] || 0) + Number(it.qty || 0);
+    });
+    const hasStock = Object.keys(purchased).some((k) => purchased[k] - (used[k] || 0) > 0);
+    return hasStock ? "raw" : "market";
+  };
+
+  const [sourceMode, setSourceMode] = useState(computeInitialSourceMode);
+
+  const [selectedIndices, setSelectedIndices] = useState([]);
   const [returnDateInput, setReturnDateInput] = useState(today);
   const [returnReasonInput, setReturnReasonInput] = useState("");
 
@@ -165,7 +230,13 @@ const SparePopup = ({
   };
 
   const amount = Number(qty || 0) * Number(rate || 0);
-  const canAddItem = !addingNewMode && !!name && Number(rate) > 0 && !!date;
+  const availableForSelectedRaw = sourceMode === "raw" ? getAvailableStock(name) : null;
+  const canAddItem =
+    !addingNewMode &&
+    !!name &&
+    Number(rate) > 0 &&
+    !!date &&
+    (sourceMode !== "raw" || Number(qty || 0) <= availableForSelectedRaw);
 
   const handleAdd = () => {
     if (!name || !rate) {
@@ -176,10 +247,15 @@ const SparePopup = ({
       showFeedback("error", "Select a date");
       return;
     }
+    if (sourceMode === "raw" && Number(qty || 0) > getAvailableStock(name)) {
+      showFeedback("error", `Only ${getAvailableStock(name)} unit(s) of "${name}" left in Raw Stock`);
+      return;
+    }
 
     const newItem = {
       name, qty: Number(qty), rate: Number(rate), amount, date,
       isReturned: false, returnDate: null, returnReason: "",
+      source: sourceMode,
     };
     setItems([...items, newItem]);
 
@@ -196,7 +272,6 @@ const SparePopup = ({
     setSelectedIndices(prev => prev.filter(i => i !== index).map(i => (i > index ? i - 1 : i)));
   };
 
-  /* ✅ NEW — Return flow (checkbox multi-select → one shared date + remark bar) */
   const toggleSelect = (index) => {
     setSelectedIndices(prev =>
       prev.includes(index) ? prev.filter(i => i !== index) : [...prev, index]
@@ -219,7 +294,6 @@ const SparePopup = ({
     }
   };
 
-  // Quick single-item return: select just this row, so the shared bar opens for it
   const quickReturnOne = (index) => {
     setSelectedIndices([index]);
     setReturnDateInput(today);
@@ -261,16 +335,6 @@ const SparePopup = ({
     showFeedback("success", "Return undone");
   };
 
-  /* ===================================================================
-     TOTALS
-     - "isOld" (before rebill) is computed on the running sum across ALL
-       items in order, INCLUDING returned ones — spareBaseline is a fixed
-       snapshot taken at rebill time and doesn't change just because an
-       item is marked returned afterwards.
-     - Everything the customer is actually billed for (current cycle total,
-       lifetime cumulative saved as service.spareCharge) EXCLUDES returned
-       items, since a returned spare shouldn't be charged.
-  =================================================================== */
   let runningSum = 0;
   const itemsWithCycle = items.map((item, idx) => {
     const isOld = runningSum < spareBaselineAmount;
@@ -292,9 +356,6 @@ const SparePopup = ({
 
   const hasRebillSplit = spareBaselineAmount > 0;
 
-  /* ===================================================================
-     MANAGE (rename/delete) — shared master list
-  =================================================================== */
   const startEdit = (spare) => {
     setDeletingId(null);
     setEditingId(spare._id);
@@ -356,8 +417,8 @@ const SparePopup = ({
   };
 
   const handleSave = () => {
-    setSpareCharge(cumulativeTotal);      // ✅ Spare Used total — bills the customer, returned items excluded
-    setSpareItems(items);                 // ✅ full array, history preserved (incl. returned)
+    setSpareCharge(cumulativeTotal);
+    setSpareItems(items);
     onClose();
   };
 
@@ -375,7 +436,6 @@ const SparePopup = ({
           </button>
         </div>
 
-        {/* ✅ IN-APP FEEDBACK BANNER — replaces window.alert() */}
         {feedback && (
           <div
             style={{
@@ -393,7 +453,6 @@ const SparePopup = ({
           </div>
         )}
 
-        {/* ✅ MANAGE SPARES PANEL — shared master list */}
         {showManage && spareList.length > 0 && (
           <div style={{ margin: "12px 20px 0" }}>
             <div style={managePanel}>
@@ -446,25 +505,81 @@ const SparePopup = ({
             <Wrench size={14} /> Spare Used <span style={sectionSub}>(bills the customer)</span>
           </div>
           <div style={addCard}>
+
+            {/* ✅ CHANGED — "From Raw Stock" now shown FIRST since it's the default,
+                emoji replaced with lucide icons */}
+            <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  if (rawStockOptions.length === 0) return;
+                  setSourceMode("raw"); setName(""); setAddingNewMode(false); setRate("");
+                }}
+                disabled={rawStockOptions.length === 0}
+                title={rawStockOptions.length === 0 ? "No Raw Spare stock left to use" : "Bill a spare already logged in Raw Spare"}
+                style={{
+                  ...(sourceMode === "raw" ? sourceBtnActiveRaw : sourceBtn),
+                  opacity: rawStockOptions.length === 0 ? 0.5 : 1,
+                  cursor: rawStockOptions.length === 0 ? "not-allowed" : "pointer",
+                }}
+              >
+                <Package size={14} /> From Raw Stock {rawStockOptions.length > 0 ? `(${rawStockOptions.length})` : ""}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setSourceMode("market"); setName(""); setAddingNewMode(false); setRate(""); }}
+                style={sourceMode === "market" ? sourceBtnActiveMarket : sourceBtn}
+              >
+                <Store size={14} /> Market Purchase
+              </button>
+            </div>
+            <div style={{ fontSize: 11, color: "#6B7280", marginBottom: 10 }}>
+              {sourceMode === "raw"
+                ? "Rate is auto-filled from Raw Spare's purchase cost — just pick the spare, check Qty, and choose a Date."
+                : "This spare is bought fresh for this job (not tracked as shop stock)."}
+            </div>
+
             <div style={{ marginBottom: 10 }}>
               <label style={label}>Spare Name</label>
               <div style={{ display: "flex", gap: 8 }}>
                 <div style={{ flex: 1 }}>
                   <Select
-                    options={spareOptions}
-                    value={!addingNewMode && name ? { label: name, value: name } : null}
+                    options={sourceMode === "raw" ? rawStockOptions : spareOptions}
+                    value={
+                      !addingNewMode && name
+                        ? (sourceMode === "raw"
+                            ? (rawStockOptions.find(o => o.value === name) || { label: name, value: name })
+                            : { label: name, value: name })
+                        : null
+                    }
                     onChange={(selected) => {
-                      if (!selected) { setName(""); setAddingNewMode(false); }
-                      else if (selected.value === "__custom") { setAddingNewMode(true); setName(""); }
-                      else { setName(selected.value); setAddingNewMode(false); setCustomName(""); }
+                      if (!selected) {
+                        setName(""); setAddingNewMode(false);
+                        if (sourceMode === "raw") setRate("");
+                        return;
+                      }
+                      if (selected.value === "__custom") {
+                        setAddingNewMode(true); setName("");
+                        return;
+                      }
+                      setName(selected.value);
+                      setAddingNewMode(false);
+                      setCustomName("");
+                      // ✅ NEW — auto-fill Rate from Raw Spare's own purchase cost,
+                      // and default Qty to 1 (capped later by availability check)
+                      if (sourceMode === "raw") {
+                        const avgRate = getAvgRawRate(selected.value);
+                        setRate(avgRate > 0 ? String(avgRate) : "");
+                        setQty(1);
+                      }
                     }}
-                    placeholder="Search or add a spare..."
+                    placeholder={sourceMode === "raw" ? "Select from Raw Stock..." : "Search or add a spare..."}
                     isClearable
                     styles={{ ...selectStyles, menuPortal: (base) => ({ ...base, zIndex: 99999 }) }}
                     menuPortalTarget={document.body}
                   />
                 </div>
-                {spareList.length > 0 && (
+                {sourceMode === "market" && spareList.length > 0 && (
                   <button
                     type="button"
                     onClick={() => setShowManage(prev => !prev)}
@@ -510,8 +625,15 @@ const SparePopup = ({
                 <input type="number" min="1" placeholder="Qty" value={qty} onChange={(e) => setQty(e.target.value)} style={smallInput} />
               </div>
               <div style={{ width: 100 }}>
-                <label style={label}>Rate ₹</label>
-                <input type="number" placeholder="Rate" value={rate} onChange={(e) => setRate(e.target.value)} style={smallInput} />
+                <label style={label}>Rate ₹ {sourceMode === "raw" && <span style={{ fontWeight: 400, color: "#9CA3AF" }}>(auto)</span>}</label>
+                <input
+                  type="number"
+                  placeholder="Rate"
+                  value={rate}
+                  onChange={(e) => setRate(e.target.value)}
+                  readOnly={sourceMode === "raw"}
+                  style={sourceMode === "raw" ? { ...smallInput, background: "#F3F4F6", color: "#6B7280", cursor: "not-allowed" } : smallInput}
+                />
               </div>
               <div style={{ width: 100 }}>
                 <label style={label}>Amount ₹</label>
@@ -531,11 +653,18 @@ const SparePopup = ({
                 </button>
               </div>
             </div>
+
+            {sourceMode === "raw" && name && (
+              <div style={{
+                fontSize: 11.5, marginTop: 8, fontWeight: 600,
+                color: Number(qty || 0) > getAvailableStock(name) ? RED : "#B45309",
+              }}>
+                Raw Stock available for "{name}": {getAvailableStock(name)} unit(s)
+                {Number(qty || 0) > getAvailableStock(name) && " — reduce Qty to add"}
+              </div>
+            )}
           </div>
 
-          {/* ✅ NEW — Bulk Return action bar: appears once at least one item is
-              selected. Same bar handles a single quick-return (from the row
-              button) and a multi-select bulk return (from the checkboxes). */}
           {selectedIndices.length > 0 && (
             <div style={returnBar}>
               <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
@@ -599,6 +728,7 @@ const SparePopup = ({
                   <th style={th}>Rate ₹</th>
                   <th style={th}>Amount ₹</th>
                   <th style={th}>Date</th>
+                  <th style={th}>Source</th>
                   <th style={th}>Status</th>
                   <th style={{ ...th, width: 70 }}></th>
                 </tr>
@@ -606,7 +736,7 @@ const SparePopup = ({
               <tbody>
                 {itemsWithCycle.length === 0 ? (
                   <tr>
-                    <td colSpan={8} style={{ ...td, textAlign: "center", color: "#9CA3AF", padding: "18px 6px" }}>
+                    <td colSpan={9} style={{ ...td, textAlign: "center", color: "#9CA3AF", padding: "18px 6px" }}>
                       No spare items used yet
                     </td>
                   </tr>
@@ -636,6 +766,15 @@ const SparePopup = ({
                       <td style={{ ...td, fontWeight: 600, color: isOld ? "#9CA3AF" : "#111827" }}>{i.amount}</td>
                       <td style={{ ...td, color: isOld ? "#9CA3AF" : "#111827" }}>{i.date ? String(i.date).slice(0, 10) : "-"}</td>
                       <td style={td}>
+                        <span style={{
+                          display: "inline-block", padding: "2px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700,
+                          background: i.source === "raw" ? AMBER_SOFT_BG : BLUE_SOFT_BG,
+                          color: i.source === "raw" ? "#B45309" : "#1D4ED8",
+                        }}>
+                          {i.source === "raw" ? "Raw Stock" : "Market"}
+                        </span>
+                      </td>
+                      <td style={td}>
                         {i.isReturned ? (
                           <span style={returnedBadge}>Returned</span>
                         ) : (
@@ -660,10 +799,9 @@ const SparePopup = ({
                       </td>
                     </tr>
 
-                    {/* Saved reason shown under a returned row, if any */}
                     {i.isReturned && (i.returnReason || i.returnDate) && (
                       <tr>
-                        <td colSpan={8} style={{ padding: "0 10px 8px", fontSize: 11.5, color: "#991B1B", borderBottom: `1px solid #F1F5F9` }}>
+                        <td colSpan={9} style={{ padding: "0 10px 8px", fontSize: 11.5, color: "#991B1B", borderBottom: `1px solid #F1F5F9` }}>
                           ↳ Returned {i.returnDate ? `on ${String(i.returnDate).slice(0, 10)}` : ""}{i.returnReason ? ` — ${i.returnReason}` : ""}
                         </td>
                       </tr>
@@ -761,6 +899,13 @@ const saveBtn = { background: GREEN, color: "#fff", border: "none", padding: "8p
 const deleteBtn = { background: RED, color: "#fff", border: "none", width: 24, height: 24, borderRadius: 5, cursor: "pointer", fontSize: 11, lineHeight: 1 };
 const returnBtn = { background: "#D97706", color: "#fff", border: "none", width: 24, height: 24, borderRadius: 5, cursor: "pointer", fontSize: 11, lineHeight: 1 };
 const undoBtn = { background: "#64748B", color: "#fff", border: "none", width: 24, height: 24, borderRadius: 5, cursor: "pointer", fontSize: 11, lineHeight: 1 };
+const sourceBtn = {
+  border: `1px solid ${BORDER}`, background: "#fff", color: "#374151", fontWeight: 700,
+  fontSize: 12.5, padding: "8px 14px", borderRadius: 8, cursor: "pointer", flex: 1,
+  display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+};
+const sourceBtnActiveMarket = { ...sourceBtn, background: BLUE_SOFT_BG, borderColor: BLUE, color: BLUE };
+const sourceBtnActiveRaw = { ...sourceBtn, background: AMBER_SOFT_BG, borderColor: AMBER, color: "#B45309" };
 const table = { width: "100%", borderCollapse: "collapse" };
 const th = { textAlign: "left", padding: "8px 10px", background: "#F9FAFB", color: "#374151", fontSize: 12, fontWeight: 700, borderBottom: `1px solid ${BORDER}` };
 const td = { padding: "8px 10px", fontSize: 13, color: "#111827", borderBottom: `1px solid #F1F5F9` };

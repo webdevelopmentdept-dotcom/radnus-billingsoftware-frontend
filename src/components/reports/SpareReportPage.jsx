@@ -4,7 +4,7 @@ import * as XLSX from "xlsx";
 import {
   Wrench, Search, User, Users, CalendarDays, RotateCcw, Printer,
   FileSpreadsheet, FileText, Package, Boxes, IndianRupee, Loader2, Inbox,
-  Phone, Filter, Hash, Tag, Activity, Layers,
+  Phone, Filter, Hash, Tag, Activity, Layers, Store, CheckCircle2, Clock,
 } from "lucide-react";
 
 const API = import.meta.env.VITE_API_URL;
@@ -16,10 +16,13 @@ const fmtDMY = (ymd) => (ymd ? ymd.split("-").reverse().join("-") : "—");
 const money = (n) =>
   `₹${Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-const emptyFilters = () => ({ q: "", rep: "", status: "", type: "", from: todayStr(), to: todayStr() });
+// ✅ NEW — "source" (Used Spare filter) + "stockStatus" (Raw Spare filter)
+const emptyFilters = () => ({ q: "", rep: "", status: "", type: "", source: "", stockStatus: "", from: todayStr(), to: todayStr() });
 
 const STATUS_LIST = ["Received", "Pending", "Repaired", "Delivered", "Delivered NR/NA", "Cancelled"];
 const TYPE_LIST = ["Used Spare", "Raw Spare"];
+const SOURCE_LIST = ["Market", "Raw Stock"]; // only meaningful for "Used Spare" rows
+const STOCK_STATUS_LIST = ["Available", "Used", "Partially Used"]; // only for "Raw Spare" rows
 
 const getCurrentStatus = (job) => job.device?.mobileStatus || "";
 
@@ -54,6 +57,22 @@ const TYPE_COLORS = {
   "Raw Spare": { bg: "#fef3c7", fg: "#b45309" },
 };
 const typeColor = (name = "") => TYPE_COLORS[name] || { bg: "#f1f5f9", fg: "#475569" };
+
+const SOURCE_COLORS = {
+  "Raw Stock": { bg: "#fef3c7", fg: "#b45309" },
+  "Market": { bg: "#dbeafe", fg: "#1d4ed8" },
+};
+const sourceColor = (name = "") => SOURCE_COLORS[name] || { bg: "#f1f5f9", fg: "#475569" };
+
+// ✅ badge colors + LUCIDE icon components for Raw Spare's "has this been used?" status
+// (previously used raw emoji characters — replaced with real icon components)
+const RAW_STATUS_COLORS = {
+  "Available": { bg: "#dcfce7", fg: "#15803d" },
+  "Used": { bg: "#fee2e2", fg: "#b91c1c" },
+  "Partially Used": { bg: "#fef3c7", fg: "#b45309" },
+};
+const rawStatusColor = (name = "") => RAW_STATUS_COLORS[name] || { bg: "#f1f5f9", fg: "#475569" };
+const RAW_STATUS_ICON = { "Available": Package, "Used": CheckCircle2, "Partially Used": Clock };
 
 const TONES = {
   blue: { bg: "#dbeafe", fg: "#2563eb" },
@@ -148,7 +167,11 @@ const SpareReportPage = () => {
       if (applied.rep && serviceRep !== applied.rep) return;
       if (applied.status && status !== applied.status) return;
 
-      const pushEntry = (si, entryType) => {
+      const pushEntry = (si, entryType, rawStatus = null) => {
+        // ✅ NEW — a Spare Used item that was Returned in the Spare popup must
+        // NOT show up in the Spare Report at all (it's no longer billed).
+        if (entryType === "Used Spare" && si.isReturned) return;
+
         const amt = Number(si.amount || 0);
         if (amt <= 0) return;
         const d = si.date ? toYMD(si.date) : repairDate;
@@ -156,10 +179,18 @@ const SpareReportPage = () => {
         if (applied.to && d > applied.to) return;
         if (applied.type && applied.type !== entryType) return;
 
+        // Source is only meaningful for "Used Spare" rows.
+        const src = entryType === "Used Spare" ? (si.source === "raw" ? "Raw Stock" : "Market") : "";
+        if (applied.source && src !== applied.source) return;
+
+        // Stock Status filter, only meaningful for "Raw Spare" rows
+        if (entryType === "Raw Spare" && applied.stockStatus && rawStatus !== applied.stockStatus) return;
+
         if (!grouped[d]) grouped[d] = [];
         grouped[d].push({
           jobSheetNo, name, contact, serviceRep, status, type: entryType,
           spare: si.name, qty: si.qty, rate: si.rate, amount: amt,
+          source: src, rawStatus: entryType === "Raw Spare" ? rawStatus : null,
         });
         gTotal += amt;
         entries += 1;
@@ -169,7 +200,32 @@ const SpareReportPage = () => {
       };
 
       (item.spareItems || []).forEach((si) => pushEntry(si, "Used Spare"));
-      (item.rawSpareItems || []).forEach((ri) => pushEntry(ri, "Raw Spare"));
+
+      // For THIS job, figure out how much of each raw-spare name has already
+      // been consumed via "From Raw Stock" Used Spare entries, then walk the
+      // Raw Spare purchase log in order and mark each entry Available /
+      // Partially Used / Used based on how much of it has been eaten into.
+      // ✅ Returned Used-Spare entries no longer count as "consumed" stock,
+      // since they were never actually kept/billed.
+      const usedFromStockByName = {};
+      (item.spareItems || []).forEach((si) => {
+        if (si.source === "raw" && !si.isReturned) {
+          const key = (si.name || "").trim();
+          usedFromStockByName[key] = (usedFromStockByName[key] || 0) + Number(si.qty || 0);
+        }
+      });
+      const remainingUsedByName = { ...usedFromStockByName };
+      (item.rawSpareItems || []).forEach((ri) => {
+        const key = (ri.name || "").trim();
+        const qty = Number(ri.qty || 0);
+        let usedQty = 0;
+        if (remainingUsedByName[key] > 0) {
+          usedQty = Math.min(qty, remainingUsedByName[key]);
+          remainingUsedByName[key] -= usedQty;
+        }
+        const rawStatus = usedQty === 0 ? "Available" : (usedQty >= qty ? "Used" : "Partially Used");
+        pushEntry(ri, "Raw Spare", rawStatus);
+      });
     });
 
     const sorted = {};
@@ -198,6 +254,7 @@ const SpareReportPage = () => {
           "Service Rep": item.serviceRep,
           "Status": item.status,
           "Type": item.type,
+          "Source / Stock": item.type === "Used Spare" ? (item.source || "-") : (item.rawStatus || "-"),
           "Spare": item.spare,
           "Qty": item.qty,
           "Rate": item.rate,
@@ -262,13 +319,55 @@ const SpareReportPage = () => {
                 <select
                   className="spr-input has-icon"
                   value={filters.type}
-                  onChange={(e) => setFilters({ ...filters, type: e.target.value })}
+                  onChange={(e) => {
+                    const newType = e.target.value;
+                    setFilters({
+                      ...filters,
+                      type: newType,
+                      source: newType !== "Used Spare" ? "" : filters.source,
+                      stockStatus: newType !== "Raw Spare" ? "" : filters.stockStatus,
+                    });
+                  }}
                 >
                   <option value="">Used + Raw (All)</option>
                   {typeOptions.map((t) => (<option key={t} value={t}>{t}</option>))}
                 </select>
               </div>
             </Field>
+
+            {/* Source filter — only for "Used Spare" */}
+            {filters.type === "Used Spare" && (
+              <Field label="Source" icon={Package} className="spr-f-rep">
+                <div className="spr-input-wrap">
+                  <Package size={16} className="spr-input-icon" />
+                  <select
+                    className="spr-input has-icon"
+                    value={filters.source}
+                    onChange={(e) => setFilters({ ...filters, source: e.target.value })}
+                  >
+                    <option value="">Market + Raw Stock (All)</option>
+                    {SOURCE_LIST.map((s) => (<option key={s} value={s}>{s}</option>))}
+                  </select>
+                </div>
+              </Field>
+            )}
+
+            {/* Stock Status filter — only for "Raw Spare" */}
+            {filters.type === "Raw Spare" && (
+              <Field label="Stock Status" icon={Package} className="spr-f-rep">
+                <div className="spr-input-wrap">
+                  <Package size={16} className="spr-input-icon" />
+                  <select
+                    className="spr-input has-icon"
+                    value={filters.stockStatus}
+                    onChange={(e) => setFilters({ ...filters, stockStatus: e.target.value })}
+                  >
+                    <option value="">All (Used + Available)</option>
+                    {STOCK_STATUS_LIST.map((s) => (<option key={s} value={s}>{s}</option>))}
+                  </select>
+                </div>
+              </Field>
+            )}
 
             <Field label="Service Rep" icon={User} className="spr-f-rep">
               <div className="spr-input-wrap">
@@ -353,6 +452,16 @@ const SpareReportPage = () => {
                   <Layers size={12} /> {applied.type}
                 </span>
               )}
+              {applied.source && (
+                <span className="spr-chip" style={{ background: sourceColor(applied.source).bg, color: sourceColor(applied.source).fg }}>
+                  <Package size={12} /> {applied.source}
+                </span>
+              )}
+              {applied.stockStatus && (
+                <span className="spr-chip" style={{ background: rawStatusColor(applied.stockStatus).bg, color: rawStatusColor(applied.stockStatus).fg }}>
+                  <Package size={12} /> {applied.stockStatus}
+                </span>
+              )}
               {applied.rep && (
                 <span className="spr-chip" style={{ background: "#eff6ff", color: "#1d4ed8" }}>
                   <User size={12} /> {applied.rep}
@@ -392,6 +501,7 @@ const SpareReportPage = () => {
                     <th><span className="spr-th"><User size={13} /> Customer</span></th>
                     <th><span className="spr-th"><Users size={13} /> Service Rep</span></th>
                     <th><span className="spr-th"><Layers size={13} /> Type</span></th>
+                    <th><span className="spr-th"><Package size={13} /> Source</span></th>
                     <th><span className="spr-th"><Activity size={13} /> Status</span></th>
                     <th><span className="spr-th"><Wrench size={13} /> Spare</span></th>
                     <th className="c"><span className="spr-th"><Boxes size={13} /> Qty</span></th>
@@ -406,7 +516,7 @@ const SpareReportPage = () => {
                     return (
                       <React.Fragment key={date}>
                         <tr className="spr-date-row">
-                          <td colSpan="10">
+                          <td colSpan="11">
                             <div className="spr-date-cell">
                               <CalendarDays size={16} />
                               {fmtDMY(date)}
@@ -421,6 +531,8 @@ const SpareReportPage = () => {
                           const rc = repColor(item.serviceRep);
                           const sc = statusColor(item.status);
                           const tc = typeColor(item.type);
+                          const soc = sourceColor(item.source);
+                          const RawStatusIcon = item.rawStatus ? RAW_STATUS_ICON[item.rawStatus] : null;
                           return (
                             <tr key={i} className="spr-row">
                               <td className="c" style={{ color: "#94a3b8" }}>{i + 1}</td>
@@ -448,6 +560,23 @@ const SpareReportPage = () => {
                                   {item.type}
                                 </span>
                               </td>
+                              {/* ✅ Used Spare shows Market/Raw Stock badge (lucide Store / Package icon);
+                                  Raw Spare shows Available/Used/Partially Used badge (lucide icon) —
+                                  no more raw emoji characters */}
+                              <td>
+                                {item.type === "Used Spare" && item.source ? (
+                                  <span className="spr-status spr-status-icon" style={{ background: soc.bg, color: soc.fg }}>
+                                    {item.source === "Raw Stock" ? <Package size={12} /> : <Store size={12} />}
+                                    {item.source === "Raw Stock" ? "Raw Stock" : "Market"}
+                                  </span>
+                                ) : item.type === "Raw Spare" && item.rawStatus ? (
+                                  <span className="spr-status spr-status-icon" style={{ background: rawStatusColor(item.rawStatus).bg, color: rawStatusColor(item.rawStatus).fg }}>
+                                    {RawStatusIcon && <RawStatusIcon size={12} />} {item.rawStatus}
+                                  </span>
+                                ) : (
+                                  <span style={{ color: "#94a3b8" }}>-</span>
+                                )}
+                              </td>
                               <td>
                                 {item.status ? (
                                   <span className="spr-status" style={{ background: sc.bg, color: sc.fg }}>
@@ -466,7 +595,7 @@ const SpareReportPage = () => {
                         })}
 
                         <tr className="spr-sub-row">
-                          <td colSpan="9" className="r">Sub Total</td>
+                          <td colSpan="10" className="r">Sub Total</td>
                           <td className="r spr-amt">{money(subTotal)}</td>
                         </tr>
                       </React.Fragment>
@@ -476,7 +605,7 @@ const SpareReportPage = () => {
 
                 <tfoot>
                   <tr className="spr-grand-row">
-                    <td colSpan="9" className="r">Grand Total</td>
+                    <td colSpan="10" className="r">Grand Total</td>
                     <td className="r">{money(grandTotal)}</td>
                   </tr>
                 </tfoot>
@@ -549,7 +678,7 @@ const SpareReportPage = () => {
         @keyframes sprSpin { to { transform: rotate(360deg); } }
 
         .spr-table-wrap { overflow-x: auto; }
-        .spr-table { width: 100%; min-width: 1080px; border-collapse: collapse; font-size: 14px; }
+        .spr-table { width: 100%; min-width: 1180px; border-collapse: collapse; font-size: 14px; }
         .spr-table th { background: #1e293b; color: #f1f5f9; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; text-align: left; padding: 12px 16px; }
         .spr-table th.c, .spr-table td.c { text-align: center; }
         .spr-table th.r, .spr-table td.r { text-align: right; }
@@ -566,6 +695,7 @@ const SpareReportPage = () => {
         .spr-rep { display: inline-flex; align-items: center; gap: 8px; font-weight: 500; color: #334155; }
         .spr-avatar { width: 28px; height: 28px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
         .spr-status { display: inline-block; padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+        .spr-status-icon { display: inline-flex; align-items: center; gap: 4px; }
         .spr-qty { display: inline-block; min-width: 28px; padding: 2px 8px; border-radius: 6px; background: #fff7ed; color: #c2410c; font-size: 12px; font-weight: 700; text-align: center; }
         .spr-amt { font-weight: 700; color: #1e293b; font-variant-numeric: tabular-nums; }
         .spr-sub-row td { background: #f8fafc; padding: 10px 16px; font-weight: 700; color: #1e293b; }

@@ -2505,7 +2505,7 @@ const today = new Date().toLocaleDateString("en-CA");
                       </div>
 
                     <div className="col-md-6">
-  <Field label="Spare Charges ">
+  <Field label="Spare Charges (Used) ">
     <input
       type="text"
       className="form-control form-control-sm"
@@ -2527,7 +2527,7 @@ const today = new Date().toLocaleDateString("en-CA");
                           Now subtracts rawSpareBaselineRef (set from service.rawSpareBaseline,
                           snapshotted by the backend /rebill route), same pattern already used
                           for Spare Charges / Other Expenses / Advance Amount below. */}
-                      <Field label="Raw Spare (Shop)">
+                      <Field label="Raw Spare (Raw)">
                         <input
                           type="text"
                           className="form-control form-control-sm"

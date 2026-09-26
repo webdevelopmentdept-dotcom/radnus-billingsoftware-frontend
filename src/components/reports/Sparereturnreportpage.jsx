@@ -4,7 +4,7 @@ import * as XLSX from "xlsx";
 import {
   Undo2, Search, User, Users, CalendarDays, RotateCcw, Printer,
   FileSpreadsheet, FileText, IndianRupee, Loader2, Inbox,
-  Phone, Filter, Hash, Package, Tag,
+  Phone, Filter, Hash, Package, MessageSquareText,
 } from "lucide-react";
 
 const API = import.meta.env.VITE_API_URL;
@@ -60,7 +60,13 @@ const StatCard = ({ icon: Icon, label, value, tone }) => (
    `job.rawSpareItems` (kept for any OLD returns saved before the move),
    tagging each row with its Source so it's clear which list it came from.
    Reads straight off /api/jobsheets/filter — no new backend route needed
-   since both fields are already saved on the job sheet. */
+   since both fields are already saved on the job sheet.
+
+   ✅ NEW — the Remark typed in the Return bar in SparePopup (saved as
+   `returnReason` on the item) is now shown clearly under the spare's row
+   as a dedicated "Remark" note line, instead of a cramped table column
+   that could get cut off. When no remark was entered, it just says so
+   in muted text instead of a bare "-". */
 const SpareReturnReportPage = () => {
   const [rawData, setRawData] = useState([]);
   const [filters, setFilters] = useState(emptyFilters());
@@ -115,7 +121,7 @@ const SpareReturnReportPage = () => {
       }
       if (applied.rep && serviceRep !== applied.rep) return;
 
-      // ✅ FIX — merge returned rows from BOTH sources: Spare Used
+      // ✅ merge returned rows from BOTH sources: Spare Used
       // (spareItems, where Return is now given) and Raw Spare
       // (rawSpareItems, kept only for older returns saved before the move).
       const returnedUsed = (item.spareItems || [])
@@ -140,7 +146,9 @@ const SpareReturnReportPage = () => {
           jobSheetNo, name, contact, serviceRep,
           spareName: ri.name, qty: ri.qty, rate: ri.rate,
           amount: Number(ri.amount || 0),
-          reason: ri.returnReason || "-",
+          // ✅ NEW — the Remark box in SparePopup's return bar saves into
+          // returnReason; trim it so stray whitespace doesn't show as a note.
+          remark: (ri.returnReason || "").trim(),
           source: ri.source,
         });
         gTotal += Number(ri.amount || 0);
@@ -176,7 +184,7 @@ const SpareReturnReportPage = () => {
           "Qty": item.qty,
           "Rate": item.rate,
           "Amount": item.amount,
-          "Reason": item.reason,
+          "Remark": item.remark || "-",
         });
       });
     });
@@ -334,14 +342,13 @@ const SpareReturnReportPage = () => {
                     <th className="c">Qty</th>
                     <th className="r">Rate ₹</th>
                     <th className="r"><span className="spr-th"><IndianRupee size={13} /> Amount</span></th>
-                    <th><span className="spr-th"><Tag size={13} /> Reason</span></th>
                   </tr>
                 </thead>
 
                 <tbody>
                   {Object.entries(groupedData).map(([date, records]) => {
                     const subTotal = records.reduce((sum, r) => sum + Number(r.amount), 0);
-                    const colCount = 10;
+                    const colCount = 9;
                     return (
                       <React.Fragment key={date}>
                         <tr className="spr-date-row">
@@ -357,34 +364,55 @@ const SpareReturnReportPage = () => {
                         </tr>
 
                         {records.map((item, i) => (
-                          <tr key={i} className="spr-row">
-                            <td className="c" style={{ color: "#94a3b8" }}>{i + 1}</td>
-                            <td><span className="spr-jobpill">{item.jobSheetNo}</span></td>
-                            <td>
-                              <div className="spr-cust">{item.name || "-"}</div>
-                              {item.contact && (
-                                <div className="spr-contact"><Phone size={11} /> {item.contact}</div>
-                              )}
-                            </td>
-                            <td>{item.serviceRep || <span style={{ color: "#94a3b8" }}>-</span>}</td>
-                            <td>
-                              <span
-                                className="spr-source"
-                                style={
-                                  item.source === "Spare Used"
-                                    ? { background: "#eff6ff", color: "#2563eb" }
-                                    : { background: "#fffbeb", color: "#b45309" }
-                                }
-                              >
-                                {item.source}
-                              </span>
-                            </td>
-                            <td style={{ fontWeight: 600 }}>{item.spareName}</td>
-                            <td className="c">{item.qty}</td>
-                            <td className="r">{item.rate}</td>
-                            <td className="r spr-amt">{money(item.amount)}</td>
-                            <td style={{ color: "#991b1b" }}>{item.reason}</td>
-                          </tr>
+                          <React.Fragment key={i}>
+                            <tr className="spr-row">
+                              <td className="c" style={{ color: "#94a3b8" }}>{i + 1}</td>
+                              <td><span className="spr-jobpill">{item.jobSheetNo}</span></td>
+                              <td>
+                                <div className="spr-cust">{item.name || "-"}</div>
+                                {item.contact && (
+                                  <div className="spr-contact"><Phone size={11} /> {item.contact}</div>
+                                )}
+                              </td>
+                              <td>{item.serviceRep || <span style={{ color: "#94a3b8" }}>-</span>}</td>
+                              <td>
+                                <span
+                                  className="spr-source"
+                                  style={
+                                    item.source === "Spare Used"
+                                      ? { background: "#eff6ff", color: "#2563eb" }
+                                      : { background: "#fffbeb", color: "#b45309" }
+                                  }
+                                >
+                                  {item.source}
+                                </span>
+                              </td>
+                              <td style={{ fontWeight: 600 }}>{item.spareName}</td>
+                              <td className="c">{item.qty}</td>
+                              <td className="r">{item.rate}</td>
+                              <td className="r spr-amt">{money(item.amount)}</td>
+                            </tr>
+
+                            {/* ✅ NEW — dedicated Remark / Notes line, right under the
+                                returned spare it belongs to, so it's always visible
+                                instead of hiding in a narrow table cell. */}
+                            <tr className="spr-remark-row">
+                              <td></td>
+                              <td colSpan={colCount - 1}>
+                                {item.remark ? (
+                                  <div className="spr-remark">
+                                    <MessageSquareText size={13} />
+                                    <span><strong>Remark:</strong> {item.remark}</span>
+                                  </div>
+                                ) : (
+                                  <div className="spr-remark spr-remark-empty">
+                                    <MessageSquareText size={13} />
+                                    <span>No remark added</span>
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          </React.Fragment>
                         ))}
 
                         <tr className="spr-sub-row">
@@ -398,7 +426,7 @@ const SpareReturnReportPage = () => {
 
                 <tfoot>
                   <tr className="spr-grand-row">
-                    <td colSpan={9} className="r">Grand Total</td>
+                    <td colSpan={8} className="r">Grand Total</td>
                     <td className="r">{money(grandTotal)}</td>
                   </tr>
                 </tfoot>
@@ -480,13 +508,21 @@ const SpareReturnReportPage = () => {
         .spr-date-row td { background: #fef2f2; border-top: 1px solid #fecaca; border-bottom: 1px solid #fecaca; padding: 10px 16px; }
         .spr-date-cell { display: flex; align-items: center; gap: 8px; font-weight: 700; color: #991b1b; }
         .spr-count { padding: 2px 8px; border-radius: 999px; background: #fee2e2; color: #dc2626; font-size: 11px; font-weight: 600; }
-        .spr-row td { border-bottom: 1px solid #f1f5f9; }
-        .spr-row:hover td { background: #f8fafc; }
+        .spr-row td { border-bottom: none; }
+        .spr-row:hover td, .spr-row:hover + .spr-remark-row td { background: #f8fafc; }
         .spr-jobpill { display: inline-block; padding: 3px 8px; border-radius: 6px; background: #f1f5f9; color: #334155; font-size: 12px; font-weight: 700; }
         .spr-source { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; white-space: nowrap; }
         .spr-cust { font-weight: 600; color: #1e293b; }
         .spr-contact { display: flex; align-items: center; gap: 4px; margin-top: 2px; font-size: 12px; color: #64748b; }
         .spr-amt { font-weight: 700; color: #1e293b; font-variant-numeric: tabular-nums; }
+
+        /* ✅ NEW — the Remark note line under each returned-item row */
+        .spr-remark-row td { padding: 0 16px 10px; border-bottom: 1px solid #f1f5f9; }
+        .spr-remark { display: flex; align-items: flex-start; gap: 6px; font-size: 12.5px; color: #7c2d12; background: #fff7ed; border: 1px solid #fed7aa; border-radius: 8px; padding: 6px 10px; line-height: 1.4; white-space: normal; word-break: break-word; }
+        .spr-remark strong { font-weight: 700; margin-right: 2px; }
+        .spr-remark svg { flex-shrink: 0; margin-top: 2px; }
+        .spr-remark-empty { color: #94a3b8; background: #f8fafc; border-color: #e2e8f0; font-style: italic; }
+
         .spr-sub-row td { background: #f8fafc; padding: 10px 16px; font-weight: 700; color: #1e293b; }
         .spr-sub-row td:first-child { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: #64748b; }
         .spr-grand-row td { background: #dc2626; color: #fff; padding: 16px; font-size: 16px; font-weight: 800; font-variant-numeric: tabular-nums; }
@@ -501,7 +537,7 @@ const SpareReturnReportPage = () => {
           .spr-noprint { display: none !important; }
           .spr-page { background: #fff; padding: 0; }
           .spr-card, .spr-stat { box-shadow: none !important; }
-          .spr-row, .spr-sub-row { break-inside: avoid; }
+          .spr-row, .spr-sub-row, .spr-remark-row { break-inside: avoid; }
           .spr-table th, .spr-grand-row td, .spr-date-row td { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         }
       `}</style>
