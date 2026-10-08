@@ -99,6 +99,29 @@ const getUncoveredRebillEntries = (job) => {
   return uncovered;
 };
 
+/* ✅ RECONCILE (1/4) — Stale revenueEntries guard.
+   Rebill aagaadha jobs ku, entries-oda total current top-level amount ah
+   vida jaasthi irukka koodadhu. Real amount ah date order la allocate pannum;
+   excess ellam latest-dated (stale) rows la vizhum → andha rows 0 aagum.
+   Rebilled jobs ah apdiye vidurom (cycle logic vera). */
+const getReconciledEntries = (job) => {
+  const raw = job.service?.revenueEntries || [];
+  if (raw.length === 0) return [];
+  if ((job.rebillHistory || []).length > 0) return raw;
+
+  const sorted = [...raw].sort((a, b) => new Date(a.date) - new Date(b.date));
+  let svcLeft = Number(job.service?.serviceCharge || 0);
+  let incLeft = Number(job.service?.income || 0);
+
+  return sorted.map((e) => {
+    const s = Math.min(Number(e.service || 0), svcLeft);
+    const i = Math.min(Number(e.income || 0), incLeft);
+    svcLeft -= s;
+    incLeft -= i;
+    return { ...e, service: s, income: i };
+  });
+};
+
 /* ================= RANGE-AWARE TOTALS (FIX — Transaction Date bug) =================
    These take an optional `range` ({from,to}).
    - range === null (default / "lifetime" view) → current-cycle top-level field +
@@ -110,7 +133,7 @@ const getUncoveredRebillEntries = (job) => {
 
 const getServiceTotal = (job, range = null) => {
   if (range) {
-    const allEntries = job.service?.revenueEntries || [];
+    const allEntries = getReconciledEntries(job); // ✅ RECONCILE (2/4)
     const entries = allEntries.filter((e) => inRange(toISODate(e.date), range.from, range.to));
     const fromEntries = entries.reduce((s, e) => s + Number(e.service || 0), 0);
 
@@ -137,7 +160,7 @@ const getServiceTotal = (job, range = null) => {
 
 const getIncomeTotal = (job, range = null) => {
   if (range) {
-    const allEntries = job.service?.revenueEntries || [];
+    const allEntries = getReconciledEntries(job); // ✅ RECONCILE (3/4)
     const entries = allEntries.filter((e) => inRange(toISODate(e.date), range.from, range.to));
     const fromEntries = entries.reduce((s, e) => s + Number(e.income || 0), 0);
 
@@ -284,7 +307,10 @@ const jobMatchesDateFilter = (job, type, from, to) => {
 
   if (type === "transaction") {
     const dates = [];
-    (job.service?.revenueEntries || []).forEach((e) => e.date && dates.push(toISODate(e.date)));
+    // ✅ RECONCILE (4/4) — zero-amount stale row date count aagaadhu
+    getReconciledEntries(job).forEach((e) => {
+      if (e.date && (Number(e.service || 0) > 0 || Number(e.income || 0) > 0)) dates.push(toISODate(e.date));
+    });
     (job.spareItems || []).forEach((si) => si.date && dates.push(toISODate(si.date)));
     (job.rawSpareItems || []).forEach((ri) => ri.date && dates.push(toISODate(ri.date)));
     (job.service?.othersItems || []).forEach((oi) => oi.date && dates.push(toISODate(oi.date)));
