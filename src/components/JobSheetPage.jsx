@@ -1781,7 +1781,7 @@ originalStatusRef.current = editData.device?.mobileStatus || "";
   onKeyDown={(e) => {
     if (e.key === "Enter") {
       e.preventDefault();
-      if (!searching) handleSearch();
+   if (!searching && !showSearchModal) handleSearch();
     }
   }}
   style={{ padding: "2px 8px", height: "28px" }}

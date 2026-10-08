@@ -13,6 +13,7 @@ const LoginModal = ({ show, onClose }) => {
   if (!show) return null;
 
   const handleLogin = async () => {
+    if (loading) return; // double submit guard
     if (!username || !password) {
       setError("Please enter username and password");
       return;
@@ -56,6 +57,14 @@ const LoginModal = ({ show, onClose }) => {
     }
   };
 
+  // ✅ NEW — Enter press panna login aagum
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      handleLogin();
+    }
+  };
+
   return (
     <>
       {/* Overlay */}
@@ -82,7 +91,9 @@ const LoginModal = ({ show, onClose }) => {
               className="form-control"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
+              onKeyDown={handleKeyDown}
               placeholder="Enter username"
+              autoFocus
             />
           </div>
 
@@ -93,6 +104,7 @@ const LoginModal = ({ show, onClose }) => {
               className="form-control"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={handleKeyDown}
               placeholder="Enter password"
             />
           </div>

@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 
 /* ================= POPUP DATE =================
@@ -19,6 +20,26 @@ const getPopupDate = (js) => {
 
 const JobSheetSearchModal = ({ data = [], onClose }) => {
   const navigate = useNavigate();
+
+  const openJob = (js) => {
+    onClose();
+    navigate(`/jobsheet/${js._id}`);
+  };
+
+  /* ENTER = first result open, ESC = close */
+  useEffect(() => {
+    const handleKey = (e) => {
+      if (e.repeat) return; // Enter pidichuttu irundha repeat aagaama
+      if (e.key === "Enter" && data.length > 0) {
+        e.preventDefault();
+        openJob(data[0]);
+      } else if (e.key === "Escape") {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [data]);
 
   return (
     <div
@@ -63,8 +84,8 @@ const JobSheetSearchModal = ({ data = [], onClose }) => {
 
             <tbody>
               {data.length > 0 ? (
-                data.map((js) => (
-                  <tr key={js._id}>
+                data.map((js, idx) => (
+                  <tr key={js._id} className={idx === 0 ? "table-active" : ""}>
                     <td>{js.jobSheetNo}</td>
                     <td>{js.customer?.name || "-"}</td>
                     <td>{js.device?.mobileStatus || "-"}</td>
@@ -72,12 +93,9 @@ const JobSheetSearchModal = ({ data = [], onClose }) => {
                     <td>
                       <button
                         className="btn btn-sm btn-primary"
-                        onClick={() => {
-                          onClose();
-                          navigate(`/jobsheet/${js._id}`);
-                        }}
+                        onClick={() => openJob(js)}
                       >
-                        Open
+                        Open {idx === 0 && "(Enter)"}
                       </button>
                     </td>
                   </tr>
