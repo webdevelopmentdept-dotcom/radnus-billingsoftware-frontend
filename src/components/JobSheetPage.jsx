@@ -1773,13 +1773,19 @@ originalStatusRef.current = editData.device?.mobileStatus || "";
               <div className="d-flex align-items-center" style={{ gap: "8px" }}>
                 <span className="fw-bold" style={{ whiteSpace: "nowrap", fontSize: "14px" }}>Search:</span>
                 <div style={{ width: "230px" }}>
-                  <input
-                    className="form-control form-control-sm"
-                    placeholder="Job Sheet / IMEI / Contact / Name"
-                    value={searchText}
-                    onChange={(e) => setSearchText(e.target.value)}
-                    style={{ padding: "2px 8px", height: "28px" }}
-                  />
+                 <input
+  className="form-control form-control-sm"
+  placeholder="Job Sheet / IMEI / Contact / Name"
+  value={searchText}
+  onChange={(e) => setSearchText(e.target.value)}
+  onKeyDown={(e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      if (!searching) handleSearch();
+    }
+  }}
+  style={{ padding: "2px 8px", height: "28px" }}
+/>
                 </div>
               </div>
 
