@@ -33,6 +33,7 @@ import AdvanceReportPage from "./components/reports/AdvanceReportPage";
 import IncomeReportPage from "./components/reports/IncomeReportPage";
 import EngineerDashboard from "./components/Engineerdashboard"
 import RebillReportPage from "./components/reports/RebillReportPage";
+import AskRadnusAI from "./components/AskRadnusAI";   // ✅ NEW — Add 1
 import './App.css';
 
 function App() {
@@ -84,6 +85,7 @@ function App() {
 <Route path="/my-report" element={<ServiceRepReportPage />} />
      
         <Route path="/rebill-report" element={<RebillReportPage />} />
+        <Route path="/ask-ai" element={<AskRadnusAI />} />   {/* ✅ NEW — Add 2 */}
         <Route path="/user-list" element={<UserListPopup />} />
         <Route path="/spare-report" element={<SpareReportPage />} />
         <Route path="/spare-return-report" element={<SpareReturnReportPage />} />   {/* 👈 NEW */}

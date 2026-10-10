@@ -1,7 +1,7 @@
 import React, { useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  ChevronDown, LayoutList, Users, Database, FileBarChart, LogOut, Menu, X
+  ChevronDown, LayoutList, Users, Database, FileBarChart, LogOut, Menu, X, Sparkles
 } from "lucide-react";
 import AdminMakeModal from "./popups/AdminMakeModal";
 import AdminModelModal from "./popups/AdminModelModal";
@@ -285,9 +285,21 @@ const JobSheetSidebar = () => {
           onMouseLeave={() => setHovered("")}
           style={itemStyle("report")}
         >
-          <FileBarChart size={18} style={{ flexShrink: 0 }} />
+                  <FileBarChart size={18} style={{ flexShrink: 0 }} />
           <Label>Report</Label>
         </div>
+                {role === "admin" && (
+          <div
+            title="Ask Radnus AI"
+            onClick={() => { navigate("/ask-ai"); setMobileOpen(false); }}
+            onMouseEnter={() => setHovered("ai")}
+            onMouseLeave={() => setHovered("")}
+            style={itemStyle("ai")}
+          >
+            <Sparkles size={18} style={{ flexShrink: 0 }} />
+            <Label>Ask Radnus AI</Label>
+          </div>
+        )}
       </div>
 
       <div style={{ padding: 8, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
