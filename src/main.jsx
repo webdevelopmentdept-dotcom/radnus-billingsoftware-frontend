@@ -16,6 +16,28 @@ axios.interceptors.request.use((cfg) => {
   return cfg;
 });
 
+// Token expire aanaalo (1 day) / thappaana token irundhaalo, API 401 tharum.
+// Appo session clear panni login page-ku anuppidum (screen blank/error aagaama).
+axios.interceptors.response.use(
+  (res) => res,
+  (err) => {
+    const API = import.meta.env.VITE_API_URL;
+    const url = err?.config?.url || "";
+    const isOurApi = API && url.startsWith(API);
+    if (
+      err?.response?.status === 401 &&
+      isOurApi &&
+      !url.includes("/api/login") &&
+      sessionStorage.getItem("token")
+    ) {
+      sessionStorage.removeItem("token");
+      sessionStorage.removeItem("user");
+      window.location.href = "/";
+    }
+    return Promise.reject(err);
+  }
+);
+
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <App />

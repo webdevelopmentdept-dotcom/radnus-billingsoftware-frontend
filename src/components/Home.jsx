@@ -22,8 +22,10 @@ const Home = () => {
   const [stats, setStats] = useState({ totalJobs: 0, pendingJobs: 0, completedJobs: 0 });
 
   useEffect(() => {
-    fetch(`${API}/api/dashboard/stats`)
-      .then(res => res.json())
+    fetch(`${API}/api/dashboard/stats`, {
+      headers: { Authorization: `Bearer ${sessionStorage.getItem("token")}` },
+    })
+      .then(res => (res.ok ? res.json() : Promise.reject(new Error("Stats load aagala"))))
       .then(data => setStats(data))
       .catch(err => console.log(err));
   }, []);
