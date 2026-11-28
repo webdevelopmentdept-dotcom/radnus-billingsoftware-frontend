@@ -12,6 +12,7 @@ import EngineerPopup from "./popups/EngineerPopup";
 import UserAddition from "./popups/UserAddition";
 import UserListPopup from "./popups/UserListPopup";
 import DistrictTalukPopup from "./popups/Districttalukpopup"
+import StoreBadge from "./StoreBadge";
 
 const COLLAPSED_W = 64;
 const EXPANDED_W = 210;
@@ -35,6 +36,7 @@ const JobSheetSidebar = () => {
   const navigate = useNavigate();
   const user = JSON.parse(sessionStorage.getItem("user") || "{}");
   const role = user?.role;
+  const canAdminOps = role === "admin" || role === "storeManager";
 
   const fbAccess = user?.feedbackAccess || "none";
   const feedbackOnly = role === "user" && fbAccess === "only";
@@ -104,280 +106,284 @@ const JobSheetSidebar = () => {
   // mobile=true -> always fully expanded (labels visible), used inside the mobile drawer
   const renderSidebar = (mobile = false) => {
     const open = mobile || isOpen;
-  const itemStyle = (key, extra = {}) => ({
-    ...navBtn,
-    ...(hovered === key ? navBtnHover : {}),
-    justifyContent: open ? "flex-start" : "center",
-    ...extra,
-  });
+    const itemStyle = (key, extra = {}) => ({
+      ...navBtn,
+      ...(hovered === key ? navBtnHover : {}),
+      justifyContent: open ? "flex-start" : "center",
+      ...extra,
+    });
 
-  // Label span that fades/collapses away when the sidebar is closed
-  const Label = ({ children }) => (
-    <span
-      style={{
-        opacity: open ? 1 : 0,
-        maxWidth: open ? 160 : 0,
-        transition: "opacity 0.3s ease, max-width 0.38s cubic-bezier(0.22, 1, 0.36, 1)",
-        overflow: "hidden",
-        display: "inline-block",
-      }}
-    >
-      {children}
-    </span>
-  );
-
-    return (
-    <>
-      <div
+    // Label span that fades/collapses away when the sidebar is closed
+    const Label = ({ children }) => (
+      <span
         style={{
-          padding: open ? "14px 16px" : "14px 0",
-          borderBottom: "1px solid rgba(255,255,255,0.08)",
-          display: "flex",
-          flexDirection: "column",
-          gap: 12,
+          opacity: open ? 1 : 0,
+          maxWidth: open ? 160 : 0,
+          transition: "opacity 0.3s ease, max-width 0.38s cubic-bezier(0.22, 1, 0.36, 1)",
+          overflow: "hidden",
+          display: "inline-block",
         }}
       >
-        {/* 3-line icon — hovering this (or anywhere in the sidebar) opens it */}
-        {!mobile && <div
+        {children}
+      </span>
+    );
+
+    return (
+      <>
+        <div
           style={{
+            padding: open ? "14px 16px" : "14px 0",
+            borderBottom: "1px solid rgba(255,255,255,0.08)",
             display: "flex",
-            justifyContent: open ? "flex-end" : "center",
+            flexDirection: "column",
+            gap: 12,
           }}
         >
-          <button
-            onClick={() => (isOpen ? setIsOpen(false) : openSidebar())}
-            aria-label={open ? "Collapse sidebar" : "Expand sidebar"}
+          {/* 3-line icon — hovering this (or anywhere in the sidebar) opens it */}
+          {!mobile && <div
             style={{
-              background: "rgba(255,255,255,0.06)",
-              border: "none",
-              color: "#fff",
-              width: 34,
-              height: 34,
-              borderRadius: 8,
               display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              cursor: "pointer",
-              flexShrink: 0,
-              transition: "transform 0.25s ease, background 0.2s ease",
+              justifyContent: open ? "flex-end" : "center",
             }}
           >
-            <Menu
-              size={18}
+            <button
+              onClick={() => (isOpen ? setIsOpen(false) : openSidebar())}
+              aria-label={open ? "Collapse sidebar" : "Expand sidebar"}
               style={{
-                transition: "transform 0.3s ease",
-                transform: open ? "rotate(90deg)" : "rotate(0deg)",
+                background: "rgba(255,255,255,0.06)",
+                border: "none",
+                color: "#fff",
+                width: 34,
+                height: 34,
+                borderRadius: 8,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+                flexShrink: 0,
+                transition: "transform 0.25s ease, background 0.2s ease",
               }}
-            />
-          </button>
-        </div>}
+            >
+              <Menu
+                size={18}
+                style={{
+                  transition: "transform 0.3s ease",
+                  transform: open ? "rotate(90deg)" : "rotate(0deg)",
+                }}
+              />
+            </button>
+          </div>}
 
-        <div style={{
-          display: "flex", alignItems: "center", gap: 8, color: "#fff", fontWeight: 700,
-          justifyContent: open ? "flex-start" : "center",
-        }}>
           <div style={{
-            width: 32, height: 32, borderRadius: "50%", background: "#DC2626",
-            display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, flexShrink: 0
+            display: "flex", alignItems: "center", gap: 8, color: "#fff", fontWeight: 700,
+            justifyContent: open ? "flex-start" : "center",
           }}>
-            {(user?.username || "A")[0].toUpperCase()}
-          </div>
-          <Label>{user?.username || "Admin"}</Label>
-        </div>
-      </div>
-
-      <div style={{ padding: "10px 8px", flex: 1, overflowY: "auto", overflowX: "hidden" }}>
-        {role === "admin" && (
-          <div
-            title="Analytics"
-            onClick={() => { navigate("/analytics"); setMobileOpen(false); }}
-            onMouseEnter={() => setHovered("analytics")}
-            onMouseLeave={() => setHovered("")}
-            style={itemStyle("analytics")}
-          >
-            <BarChart3 size={18} style={{ flexShrink: 0 }} />
-            <Label>Analytics</Label>
-          </div>
-        )}
-
-        {!feedbackOnly && (
-          <div
-            title="Job Sheet"
-            onClick={() => { navigate("/jobsheet"); setMobileOpen(false); }}
-            onMouseEnter={() => setHovered("job")}
-            onMouseLeave={() => setHovered("")}
-            style={itemStyle("job")}
-          >
-            <LayoutList size={18} style={{ flexShrink: 0 }} />
-            <Label>Job Sheet</Label>
-          </div>
-        )}
-
-        {canFeedback && (
-          <div
-            title={role === "admin" ? "Feedback Report" : "Feedback"}
-            onClick={() => { navigate(role === "admin" ? "/feedback-report" : "/feedback"); setMobileOpen(false); }}
-            onMouseEnter={() => setHovered("feedback")}
-            onMouseLeave={() => setHovered("")}
-            style={itemStyle("feedback")}
-          >
-            <PhoneCall size={18} style={{ flexShrink: 0 }} />
-            <Label>{role === "admin" ? "Feedback Report" : "Feedback"}</Label>
-          </div>
-        )}
-
-                {canCases && (
-          <div
-            title="Cases"
-            onClick={() => { navigate("/cases"); setMobileOpen(false); }}
-            onMouseEnter={() => setHovered("cases")}
-            onMouseLeave={() => setHovered("")}
-            style={itemStyle("cases")}
-          >
-            <span style={{ position: "relative", display: "inline-flex", flexShrink: 0 }}>
-              <Inbox size={18} />
-              {caseCount > 0 && (
-                <span style={{
-                  position: "absolute", top: -7, right: -9, background: "#EF4444", color: "#fff",
-                  borderRadius: 10, fontSize: 9, fontWeight: 800, padding: "1px 5px",
-                }}>{caseCount}</span>
-              )}
-            </span>
-            <Label>Cases</Label>
-          </div>
-        )}
-
-        {role === "admin" && (
-          <div
-            onMouseEnter={() => handleGroupHover(setAdminOpen, true, open)}
-            onMouseLeave={() => handleGroupHover(setAdminOpen, false, open)}
-          >
-            <div
-              title="Admin Operation"
-              onClick={() => handleGroupClick(setAdminOpen, open)}
-              onMouseEnter={() => setHovered("admin")}
-              onMouseLeave={() => setHovered("")}
-              style={itemStyle("admin")}
-            >
-              <Users size={18} style={{ flexShrink: 0 }} />
-              <Label>Admin Operation</Label>
-              {open && (
-                <ChevronDown
-                  size={14}
-                  style={{
-                    marginLeft: "auto",
-                    transform: adminOpen ? "rotate(180deg)" : "none",
-                    transition: "transform 0.25s ease",
-                    flexShrink: 0,
-                  }}
-                />
-              )}
+            <div style={{
+              width: 32, height: 32, borderRadius: "50%", background: "#DC2626",
+              display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, flexShrink: 0
+            }}>
+              {(user?.username || "A")[0].toUpperCase()}
             </div>
+            <div style={{ minWidth: 0, display: "flex", flexDirection: "column" }}>
+              <Label>{user?.username || "Admin"}</Label>
+              <StoreBadge open={open} />
+            </div>
+          </div>
+        </div>
+
+        <div style={{ padding: "10px 8px", flex: 1, overflowY: "auto", overflowX: "hidden" }}>
+          {role === "admin" && (
             <div
-              style={{
-                display: "grid",
-                gridTemplateRows: open && adminOpen ? "1fr" : "0fr",
-                opacity: open && adminOpen ? 1 : 0,
-                transition: "grid-template-rows 0.28s cubic-bezier(0.22,1,0.36,1), opacity 0.22s ease",
-              }}
+              title="Analytics"
+              onClick={() => { navigate("/analytics"); setMobileOpen(false); }}
+              onMouseEnter={() => setHovered("analytics")}
+              onMouseLeave={() => setHovered("")}
+              style={itemStyle("analytics")}
             >
-              <div style={{ overflow: "hidden" }}>
-                <div style={{ paddingLeft: 26, paddingTop: 2 }}>
-                  <div style={subBtn} onClick={() => { setShowEngineerModal(true); setMobileOpen(false); }}>Engineer Addition</div>
-                  <div style={subBtn} onClick={() => { setShowUserList(true); setMobileOpen(false); }}>User List</div>
-                  <div style={subBtn} onClick={() => { setShowUserModal(true); setMobileOpen(false); }}>User Addition</div>
+              <BarChart3 size={18} style={{ flexShrink: 0 }} />
+              <Label>Analytics</Label>
+            </div>
+          )}
+
+          {!feedbackOnly && (
+            <div
+              title="Job Sheet"
+              onClick={() => { navigate("/jobsheet"); setMobileOpen(false); }}
+              onMouseEnter={() => setHovered("job")}
+              onMouseLeave={() => setHovered("")}
+              style={itemStyle("job")}
+            >
+              <LayoutList size={18} style={{ flexShrink: 0 }} />
+              <Label>Job Sheet</Label>
+            </div>
+          )}
+
+          {canFeedback && (
+            <div
+              title={role === "admin" ? "Feedback Report" : "Feedback"}
+              onClick={() => { navigate(role === "admin" ? "/feedback-report" : "/feedback"); setMobileOpen(false); }}
+              onMouseEnter={() => setHovered("feedback")}
+              onMouseLeave={() => setHovered("")}
+              style={itemStyle("feedback")}
+            >
+              <PhoneCall size={18} style={{ flexShrink: 0 }} />
+              <Label>{role === "admin" ? "Feedback Report" : "Feedback"}</Label>
+            </div>
+          )}
+
+          {canCases && (
+            <div
+              title="Cases"
+              onClick={() => { navigate("/cases"); setMobileOpen(false); }}
+              onMouseEnter={() => setHovered("cases")}
+              onMouseLeave={() => setHovered("")}
+              style={itemStyle("cases")}
+            >
+              <span style={{ position: "relative", display: "inline-flex", flexShrink: 0 }}>
+                <Inbox size={18} />
+                {caseCount > 0 && (
+                  <span style={{
+                    position: "absolute", top: -7, right: -9, background: "#EF4444", color: "#fff",
+                    borderRadius: 10, fontSize: 9, fontWeight: 800, padding: "1px 5px",
+                  }}>{caseCount}</span>
+                )}
+              </span>
+              <Label>Cases</Label>
+            </div>
+          )}
+
+          {canAdminOps && (
+            <div
+              onMouseEnter={() => handleGroupHover(setAdminOpen, true, open)}
+              onMouseLeave={() => handleGroupHover(setAdminOpen, false, open)}
+            >
+              <div
+                title="Admin Operation"
+                onClick={() => handleGroupClick(setAdminOpen, open)}
+                onMouseEnter={() => setHovered("admin")}
+                onMouseLeave={() => setHovered("")}
+                style={itemStyle("admin")}
+              >
+                <Users size={18} style={{ flexShrink: 0 }} />
+                <Label>Admin Operation</Label>
+                {open && (
+                  <ChevronDown
+                    size={14}
+                    style={{
+                      marginLeft: "auto",
+                      transform: adminOpen ? "rotate(180deg)" : "none",
+                      transition: "transform 0.25s ease",
+                      flexShrink: 0,
+                    }}
+                  />
+                )}
+              </div>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateRows: open && adminOpen ? "1fr" : "0fr",
+                  opacity: open && adminOpen ? 1 : 0,
+                  transition: "grid-template-rows 0.28s cubic-bezier(0.22,1,0.36,1), opacity 0.22s ease",
+                }}
+              >
+                <div style={{ overflow: "hidden" }}>
+                  <div style={{ paddingLeft: 26, paddingTop: 2 }}>
+                    <div style={subBtn} onClick={() => { setShowEngineerModal(true); setMobileOpen(false); }}>Engineer Addition</div>
+                    <div style={subBtn} onClick={() => { setShowUserList(true); setMobileOpen(false); }}>User List</div>
+                    <div style={subBtn} onClick={() => { setShowUserModal(true); setMobileOpen(false); }}>User Addition</div>
+                    {role === "admin" && <div style={subBtn} onClick={() => { navigate("/stores"); setMobileOpen(false); }}>Store Management</div>}
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {!feedbackOnly && (
-          <div
-            onMouseEnter={() => handleGroupHover(setDataOpen, true, open)}
-            onMouseLeave={() => handleGroupHover(setDataOpen, false, open)}
-          >
+          {!feedbackOnly && (
             <div
-              title="Data Operation"
-              onClick={() => handleGroupClick(setDataOpen, open)}
-              onMouseEnter={() => setHovered("data")}
-              onMouseLeave={() => setHovered("")}
-              style={itemStyle("data")}
+              onMouseEnter={() => handleGroupHover(setDataOpen, true, open)}
+              onMouseLeave={() => handleGroupHover(setDataOpen, false, open)}
             >
-              <Database size={18} style={{ flexShrink: 0 }} />
-              <Label>Data Operation</Label>
-              {open && (
-                <ChevronDown
-                  size={14}
-                  style={{
-                    marginLeft: "auto",
-                    transform: dataOpen ? "rotate(180deg)" : "none",
-                    transition: "transform 0.25s ease",
-                    flexShrink: 0,
-                  }}
-                />
-              )}
-            </div>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateRows: open && dataOpen ? "1fr" : "0fr",
-                opacity: open && dataOpen ? 1 : 0,
-                transition: "grid-template-rows 0.28s cubic-bezier(0.22,1,0.36,1), opacity 0.22s ease",
-              }}
-            >
-              <div style={{ overflow: "hidden" }}>
-                <div style={{ paddingLeft: 26, paddingTop: 2 }}>
-                  <div style={subBtn} onClick={() => { setShowFaultModal(true); setMobileOpen(false); }}>Fault</div>
-                  <div style={subBtn} onClick={() => { setShowMakeModal(true); setMobileOpen(false); }}>Make</div>
-                  <div style={subBtn} onClick={() => { setShowModelModal(true); setMobileOpen(false); }}>Model</div>
-                  <div style={subBtn} onClick={() => { setShowDrawerModal(true); setMobileOpen(false); }}>Drawer</div>
-                  <div style={subBtn} onClick={() => { setShowDistrictTalukModal(true); setMobileOpen(false); }}>District / Taluk</div>
+              <div
+                title="Data Operation"
+                onClick={() => handleGroupClick(setDataOpen, open)}
+                onMouseEnter={() => setHovered("data")}
+                onMouseLeave={() => setHovered("")}
+                style={itemStyle("data")}
+              >
+                <Database size={18} style={{ flexShrink: 0 }} />
+                <Label>Data Operation</Label>
+                {open && (
+                  <ChevronDown
+                    size={14}
+                    style={{
+                      marginLeft: "auto",
+                      transform: dataOpen ? "rotate(180deg)" : "none",
+                      transition: "transform 0.25s ease",
+                      flexShrink: 0,
+                    }}
+                  />
+                )}
+              </div>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateRows: open && dataOpen ? "1fr" : "0fr",
+                  opacity: open && dataOpen ? 1 : 0,
+                  transition: "grid-template-rows 0.28s cubic-bezier(0.22,1,0.36,1), opacity 0.22s ease",
+                }}
+              >
+                <div style={{ overflow: "hidden" }}>
+                  <div style={{ paddingLeft: 26, paddingTop: 2 }}>
+                    <div style={subBtn} onClick={() => { setShowFaultModal(true); setMobileOpen(false); }}>Fault</div>
+                    <div style={subBtn} onClick={() => { setShowMakeModal(true); setMobileOpen(false); }}>Make</div>
+                    <div style={subBtn} onClick={() => { setShowModelModal(true); setMobileOpen(false); }}>Model</div>
+                    <div style={subBtn} onClick={() => { setShowDrawerModal(true); setMobileOpen(false); }}>Drawer</div>
+                    <div style={subBtn} onClick={() => { setShowDistrictTalukModal(true); setMobileOpen(false); }}>District / Taluk</div>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {!feedbackOnly && (
-          <div
-            title="Report"
-            onClick={() => { navigate("/report"); setMobileOpen(false); }}
-            onMouseEnter={() => setHovered("report")}
-            onMouseLeave={() => setHovered("")}
-            style={itemStyle("report")}
-          >
-            <FileBarChart size={18} style={{ flexShrink: 0 }} />
-            <Label>Report</Label>
-          </div>
-        )}
-        {role === "admin" && (
-          <div
-            title="Ask Radnus AI"
-            onClick={() => { navigate("/ask-ai"); setMobileOpen(false); }}
-            onMouseEnter={() => setHovered("ai")}
-            onMouseLeave={() => setHovered("")}
-            style={itemStyle("ai")}
-          >
-            <Sparkles size={18} style={{ flexShrink: 0 }} />
-            <Label>Ask Radnus AI</Label>
-          </div>
-        )}
-      </div>
-
-      <div style={{ padding: 8, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
-        <div
-          title="Logout"
-          onClick={handleLogout}
-          onMouseEnter={() => setHovered("logout")}
-          onMouseLeave={() => setHovered("")}
-          style={{ ...itemStyle("logout"), color: "#f87171" }}
-        >
-          <LogOut size={18} style={{ flexShrink: 0 }} />
-          <Label>Logout</Label>
+          {!feedbackOnly && (
+            <div
+              title="Report"
+              onClick={() => { navigate("/report"); setMobileOpen(false); }}
+              onMouseEnter={() => setHovered("report")}
+              onMouseLeave={() => setHovered("")}
+              style={itemStyle("report")}
+            >
+              <FileBarChart size={18} style={{ flexShrink: 0 }} />
+              <Label>Report</Label>
+            </div>
+          )}
+          {role === "admin" && (
+            <div
+              title="Ask Radnus AI"
+              onClick={() => { navigate("/ask-ai"); setMobileOpen(false); }}
+              onMouseEnter={() => setHovered("ai")}
+              onMouseLeave={() => setHovered("")}
+              style={itemStyle("ai")}
+            >
+              <Sparkles size={18} style={{ flexShrink: 0 }} />
+              <Label>Ask Radnus AI</Label>
+            </div>
+          )}
         </div>
-      </div>
-    </>
+
+        <div style={{ padding: 8, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+          <div
+            title="Logout"
+            onClick={handleLogout}
+            onMouseEnter={() => setHovered("logout")}
+            onMouseLeave={() => setHovered("")}
+            style={{ ...itemStyle("logout"), color: "#f87171" }}
+          >
+            <LogOut size={18} style={{ flexShrink: 0 }} />
+            <Label>Logout</Label>
+          </div>
+        </div>
+      </>
     );
   };
 

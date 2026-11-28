@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import axios from "axios";                       // ← NEW
 import App from './App.jsx'
+import { getActiveStoreId } from "./activeStore";
 import "bootstrap/dist/js/bootstrap.bundle.min.js";
 import "bootstrap/dist/css/bootstrap.min.css";
 import "./index.css";
@@ -12,6 +13,8 @@ axios.interceptors.request.use((cfg) => {
   const API = import.meta.env.VITE_API_URL;
   if (token && API && cfg.url && cfg.url.startsWith(API)) {
     cfg.headers.Authorization = `Bearer ${token}`;
+    const sid = getActiveStoreId();                       // Phase 3B: admin-oda store selector
+    if (sid) cfg.headers["X-Store-Id"] = sid;
   }
   return cfg;
 });

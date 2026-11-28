@@ -1,13 +1,32 @@
 import React, { useEffect, useState } from "react";
 import axios from "axios";
+import { getActiveStoreId } from "../../activeStore";
 
 const EngineerPopup = ({ onClose }) => {
-  const [list, setList]     = useState([]);
-  const [name, setName]     = useState("");
+  const [list, setList] = useState([]);
+  const [name, setName] = useState("");
   const [editId, setEditId] = useState(null);
+  const isAdmin = JSON.parse(sessionStorage.getItem("user") || "{}").role === "admin";
+  const [stores, setStores] = useState([]);
+  const [storeId, setStoreId] = useState("");   // "" = store-a maathala (new: Main, edit: ippo irukkura store)
+  const mainStore = stores.find(s => s.isDefault);
+  const storeName = (id) => {
+    if (!stores.length) return "";
+    const s = stores.find(x => String(x._id) === String(id));
+    return s ? s.name : (mainStore?.name || "Main Store");   // illa / theriyaadha = Main
+  };
   const API = import.meta.env.VITE_API_URL;
 
   useEffect(() => { fetchData(); }, []);
+
+  useEffect(() => {
+    fetchData();
+    if (isAdmin) {
+      axios.get(`${API}/api/stores`)
+        .then(r => setStores((r.data || []).filter(s => s.active)))
+        .catch(() => { });
+    }
+  }, []);
 
   const fetchData = async () => {
     const res = await axios.get(`${API}/api/engineers`);
@@ -17,9 +36,9 @@ const EngineerPopup = ({ onClose }) => {
   const handleSave = async () => {
     if (!name.trim()) return alert("Enter engineer name");
     if (editId) {
-      await axios.put(`${API}/api/engineers/${editId}`, { name });
+      await axios.put(`${API}/api/engineers/${editId}`, { name, ...(isAdmin && storeId ? { storeId } : {}) }); setStoreId("");
     } else {
-      await axios.post(`${API}/api/engineers`, { name });
+      await axios.post(`${API}/api/engineers`, { name, ...(isAdmin && storeId ? { storeId } : {}) }); setStoreId("");
     }
     setName("");
     setEditId(null);
@@ -29,6 +48,7 @@ const EngineerPopup = ({ onClose }) => {
   const handleEdit = (e) => {
     setName(e.name);
     setEditId(e._id);
+    setStoreId(e.storeId ? String(e.storeId) : "");
   };
 
   const handleDelete = async (id) => {
@@ -65,6 +85,24 @@ const EngineerPopup = ({ onClose }) => {
             <button onClick={onClose} style={{ fontSize: "18px", cursor: "pointer", border: "none", background: "transparent" }}>✖</button>
           </div>
 
+          {/* STORE (admin only) */}
+          {isAdmin && (
+            <div className="mb-2">
+              <label style={{ fontSize: "12px", fontWeight: 700, color: "#475569" }}>Store</label>
+              <select
+                value={storeId || getActiveStoreId() || (mainStore ? mainStore._id : "")}
+                onChange={(e) => setStoreId(e.target.value)}
+                style={{ width: "100%", padding: "8px 12px", border: "1px solid #ccc", borderRadius: "8px", color: "#000", fontSize: "14px", background: "#fff" }}
+              >
+                {stores.map((s) => (
+                  <option key={s._id} value={s._id}>
+                    {s.name} ({s.city}){s.isDefault ? " – Main" : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           {/* INPUT ROW */}
           <div className="flex gap-2 mb-4">
             <input
@@ -98,7 +136,7 @@ const EngineerPopup = ({ onClose }) => {
             </button>
             {editId && (
               <button
-                onClick={() => { setName(""); setEditId(null); }}
+                onClick={() => { setName(""); setEditId(null); setStoreId(""); }}
                 style={{
                   backgroundColor: "#6b7280",
                   color: "#fff",
@@ -130,6 +168,11 @@ const EngineerPopup = ({ onClose }) => {
                     <td style={{ padding: "10px", border: "1px solid #ddd", color: "#6b7280", fontSize: "13px" }}>{i + 1}</td>
                     <td style={{ padding: "10px", border: "1px solid #ddd", fontWeight: 600 }}>
                       🔧 {e.name}
+                      {isAdmin && storeName(e.storeId) && (
+                        <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, background: "#e0e7ff", color: "#3730a3", padding: "2px 8px", borderRadius: 999 }}>
+                          {storeName(e.storeId)}
+                        </span>
+                      )}
                     </td>
                     <td style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>
                       <button

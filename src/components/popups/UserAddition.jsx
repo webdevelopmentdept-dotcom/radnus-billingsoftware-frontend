@@ -12,9 +12,14 @@ const UserAddition = ({ onClose }) => {
     password: "",
     role: "user",
     feedbackAccess: "none",   // ✅ NEW
+    storeId: "",
     linkedRep: ""
   });
   const [loading, setLoading] = useState(false);
+
+  const me = JSON.parse(sessionStorage.getItem("user") || "{}");
+  const isAdmin = me.role === "admin";
+  const [stores, setStores] = useState([]);
 
   // ── SALES REP ──
   const [repList, setRepList] = useState([]);
@@ -23,6 +28,11 @@ const UserAddition = ({ onClose }) => {
 
   useEffect(() => {
     window.getSelection()?.removeAllRanges();
+    if (isAdmin) {
+      axios.get(`${API}/api/stores`)
+        .then(r => setStores((r.data || []).filter(s => s.active)))
+        .catch(() => { });
+    }
     fetchReps();
   }, []);
 
@@ -39,9 +49,13 @@ const UserAddition = ({ onClose }) => {
     }
     try {
       setLoading(true);
-      await axios.post(`${API}/api/users`, form);
+      if (form.role === "storeManager" && !form.storeId) {
+        alert("Select a store for the Store Manager");
+        return;
+      }
+      await axios.post(`${API}/api/users`, { ...form, storeId: form.storeId || undefined });
       alert("User created ✅");
-      setForm({ name: "", username: "", password: "", role: "user", feedbackAccess: "none", linkedRep: "" });
+      setForm({ name: "", username: "", password: "", role: "user", feedbackAccess: "none", linkedRep: "", storeId: "" });
       onClose();
     } catch (err) {
       alert(err.response?.data?.message || "Error ❌");
@@ -75,6 +89,7 @@ const UserAddition = ({ onClose }) => {
     user: { bg: "#eff6ff", border: "#3b82f6", text: "#1d4ed8", label: "👤 User (Reception)" },
     engineer: { bg: "#f0fdf4", border: "#22c55e", text: "#15803d", label: "🔧 Engineer" },
     admin: { bg: "#fef3c7", border: "#f59e0b", text: "#b45309", label: "⚙️ Admin" },
+    storeManager: { bg: "#f5f3ff", border: "#8b5cf6", text: "#6d28d9", label: "🏬 Store Manager" },
   };
 
   return (
@@ -172,7 +187,8 @@ const UserAddition = ({ onClose }) => {
                 >
                   <option value="user">👤 User (Reception)</option>
                   <option value="engineer">🔧 Engineer</option>
-                  <option value="admin">⚙️ Admin</option>
+                  {isAdmin && <option value="storeManager">🏬 Store Manager</option>}
+                  {isAdmin && <option value="admin">⚙️ Admin</option>}
                 </select>
                 <div
                   className="mt-2 px-3 py-1 rounded-full text-xs font-semibold inline-block"
@@ -185,6 +201,27 @@ const UserAddition = ({ onClose }) => {
                   {roleColors[form.role]?.label}
                 </div>
               </div>
+
+              {isAdmin && form.role !== "admin" && (
+                <div>
+                  <label className="text-sm text-gray-700 font-medium">
+                    Store {form.role === "storeManager" ? "(required)" : ""}
+                  </label>
+                  <select
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 mt-1 focus:ring-2 focus:ring-blue-500 outline-none bg-white text-black"
+                    value={form.storeId}
+                    onChange={e => setForm({ ...form, storeId: e.target.value })}
+                  >
+                    {form.role !== "storeManager" && <option value="">Current store (default)</option>}
+                    {form.role === "storeManager" && <option value="">— Select store —</option>}
+                    {stores.filter(s => !(s.isDefault && form.role !== "storeManager")).map(s => (
+                      <option key={s._id} value={s._id}>
+                        {s.name} ({s.city}){s.isDefault ? " – Main" : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               {form.role === "user" && (
                 <>

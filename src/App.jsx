@@ -39,6 +39,7 @@ import RequireRole from "./components/RequireRole";
 import FeedbackReportPage from "./components/FeedbackReportPage";
 import CasesPage from "./components/CasesPage";
 import AnalyticsPage from "./components/AnalyticsPage";
+import StoreManagementPage from "./components/StoreManagementPage";
 import './App.css';
 
 function App() {
@@ -89,6 +90,7 @@ function App() {
         <Route path="/feedback-report" element={<RequireRole adminOnly><FeedbackReportPage /></RequireRole>} />
         <Route path="/cases" element={<RequireRole cases><CasesPage /></RequireRole>} />
         <Route path="/analytics" element={<RequireRole adminOnly><AnalyticsPage /></RequireRole>} />   {/* ✅ NEW */}
+        <Route path="/stores" element={<RequireRole adminOnly><StoreManagementPage /></RequireRole>} />
         <Route path="/user-list" element={<UserListPopup />} />
         <Route path="/spare-report" element={<SpareReportPage />} />
         <Route path="/spare-return-report" element={<SpareReturnReportPage />} />   {/* 👈 NEW */}
